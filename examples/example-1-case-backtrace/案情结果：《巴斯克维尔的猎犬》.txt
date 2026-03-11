@@ -1,0 +1,14 @@
+## 三、实际的案情重演
+
+* 真正的主谋是 **Stapleton**。他并不是普通邻居，而是 **Rodger Baskerville 的儿子**，也就是巴斯克维尔家族的隐秘后裔；他改名换姓生活，目标是通过除掉现有继承人来夺取家产。
+* 那位被他称作“妹妹”的 **Beryl** 实际上是他的妻子。匿名警告信和私下劝退 Sir Henry 的行为，都是她在恐惧丈夫、又想救人的矛盾状态下做出的。
+* Stapleton 先利用 **Laura Lyons** 把 Sir Charles 在特定时间引到紫杉小径的门口，再让真正的杀人工具出场。Laura 本人并不知道谋杀计划，她只是被 Stapleton 欺骗和利用。
+* 真正的“巴斯克维尔猎犬”并不是超自然怪物，而是一条被 Stapleton 秘密豢养的大猎犬。它平时被藏在 **Grimpen Mire** 一带的隐蔽地点，必要时也会被带到 Merripit House 附近。
+* 为了把猎犬包装成“地狱之犬”，Stapleton 在它身上涂抹了会发光的混合物；Holmes 在最终 confrontation 后明确认出这是一种以 **phosphorus** 为基础的发光处理。
+* Sir Charles 本身心脏不好，又深信家族诅咒。Stapleton 正是利用这一点，用发光猎犬在夜色与恐惧中追逼他，最终导致他惊惧而死；Dr. Mortimer 看到的巨大犬足迹，就是那条猎犬留下的。
+* 针对 Sir Henry，Stapleton 需要猎犬能够准确循味追踪，因此才会设法偷走他的旧靴。后来猎犬还一度误追到穿着 Sir Henry 旧衣物的逃犯 **Selden**，造成“错杀”。
+* Holmes 最终设局，让 Sir Henry 作为诱饵，把 Stapleton 和猎犬逼到行动中；猎犬被当场击毙，而 Stapleton 在败露后逃向 Grimpen Mire，最后死在自己最熟悉、也最依赖的沼泽里。
+
+
+[1]: https://www.britannica.com/topic/The-Hound-of-the-Baskervilles?utm_source=chatgpt.com "The Hound of the Baskervilles | Summary & Facts"
+[2]: https://www.gutenberg.org/files/2852/2852-h/2852-h.htm "The Hound of the Baskervilles | Project Gutenberg"
