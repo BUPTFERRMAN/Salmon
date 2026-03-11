@@ -165,6 +165,8 @@ class AgentStep(BaseModel):
     status: str
     findings: List[str]
     confidence: float
+    round_index: int = 1
+    focus_refs: List[str] = Field(default_factory=list)
 
 
 class AgentProfile(BaseModel):
@@ -184,6 +186,8 @@ class AgentExchange(BaseModel):
     audience: str
     message: str
     stage: str
+    round_index: int = 1
+    evidence_refs: List[str] = Field(default_factory=list)
 
 
 class PipelineStep(BaseModel):
@@ -249,7 +253,9 @@ class AgentTurnRequest(BaseModel):
     detected_language: str
     document: UploadedDocument
     agent_name: str
+    round_index: int = 1
     prior_steps: List[AgentStep] = Field(default_factory=list)
+    prior_dialogue: List[AgentExchange] = Field(default_factory=list)
 
 
 class AgentTurnResponse(BaseModel):
@@ -257,6 +263,7 @@ class AgentTurnResponse(BaseModel):
     expected_outcome: str
     detected_language: str
     model_status: str
+    round_index: int
     pipeline: List[PipelineStep]
     agent_profile: AgentProfile
     agent_step: AgentStep

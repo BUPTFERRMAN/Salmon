@@ -144,6 +144,11 @@ AGENTS = [
 ]
 
 ROLE_KEYWORDS = ["\u533b\u751f", "\u6559\u6388", "\u8b66\u5bdf", "\u7ee7\u7236", "\u6bcd\u4eb2", "\u59b9\u59b9", "\u59d0\u59d0", "\u4fdd\u5b89", "\u7ecf\u7406", "\u4e3b\u4efb", "\u7ef4\u4fee", "\u62a4\u58eb", "\u53f8\u673a", "\u8d22\u52a1"]
+AGENT_COLLAB_ROUNDS = 2
+AGENT_ROUND_PLANS = [
+    ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent"],
+    ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent", "Judge Agent"],
+]
 
 RISK_WORDS = {
     "missing": 3,
@@ -223,12 +228,21 @@ def reason_case_material(
     agent_steps: List[AgentStep] = []
     agent_dialogue: List[AgentExchange] = []
     statuses: List[str] = []
-
-    for spec in AGENTS:
-        turn = run_agent_turn(structured, outcome, language, document, spec["agent_name"], agent_steps)
-        agent_steps.append(turn.agent_step)
-        agent_dialogue.extend(turn.dialogue)
-        statuses.append(turn.model_status)
+    for round_index, round_agents in enumerate(AGENT_ROUND_PLANS, start=1):
+        for agent_name in round_agents:
+            turn = run_agent_turn(
+                structured_case=structured,
+                expected_outcome=outcome,
+                detected_language=language,
+                document=document,
+                agent_name=agent_name,
+                prior_steps=agent_steps,
+                prior_dialogue=agent_dialogue,
+                round_index=round_index,
+            )
+            agent_steps.append(turn.agent_step)
+            agent_dialogue.extend(turn.dialogue)
+            statuses.append(turn.model_status)
 
     synthesis = synthesize_case(structured, outcome, language, document, agent_steps)
     model_status = "model_plus_rules" if any(status == "model_plus_rules" for status in [*statuses, synthesis.model_status]) else "rules_only"
@@ -281,29 +295,47 @@ def run_agent_turn(
     document: UploadedDocument,
     agent_name: str,
     prior_steps: List[AgentStep],
+    prior_dialogue: Optional[List[AgentExchange]] = None,
+    round_index: int = 1,
 ) -> AgentTurnResponse:
     spec = _agent_spec(agent_name)
     llm_client = OpenAICompatibleClient()
+    prior_dialogue = prior_dialogue or []
     profile = _build_agent_profile_from_spec(spec, structured_case, detected_language)
     step = None
     model_status = "rules_only"
 
     if llm_client.enabled:
-        step = _run_agent_turn_with_llm(llm_client, structured_case, expected_outcome, detected_language, document, spec, prior_steps)
+        step = _run_agent_turn_with_llm(
+            llm_client,
+            structured_case,
+            expected_outcome,
+            detected_language,
+            document,
+            spec,
+            prior_steps,
+            prior_dialogue,
+            round_index,
+        )
         if step:
             model_status = "model_plus_rules"
 
     if not step:
-        step = _run_agent_turn_with_rules(structured_case, detected_language, spec, prior_steps)
+        step = _run_agent_turn_with_rules(structured_case, detected_language, spec, prior_steps, round_index)
+
+    profile.current_focus = step.findings[0] if step.findings else profile.current_focus
+    profile.persistent_state = f"{profile.persistent_state} / round {round_index}"
+    profile.memory_notes = [*step.findings[:2], *profile.memory_notes][:5]
 
     return AgentTurnResponse(
         expected_outcome=expected_outcome,
         detected_language=detected_language,
         model_status=model_status,
+        round_index=round_index,
         pipeline=_pipeline("in_progress", "pending"),
         agent_profile=profile,
         agent_step=step,
-        dialogue=[_build_exchange(agent_name, _next_agent_name(agent_name), step, structured_case, detected_language)],
+        dialogue=[_build_exchange(agent_name, _next_agent_name(agent_name), step, structured_case, detected_language, round_index)],
     )
 
 
@@ -827,7 +859,7 @@ def _build_evidence_items(structured: Dict, source_name: str) -> List[EvidenceIt
 
 
 def _build_agent_steps(structured: Dict, language: str) -> List[AgentStep]:
-    return [_run_agent_turn_with_rules(structured, language, spec, []) for spec in AGENTS]
+    return [_run_agent_turn_with_rules(structured, language, spec, [], 1) for spec in AGENTS]
 
 
 def _build_agent_profiles(structured: Dict, language: str) -> List[AgentProfile]:
@@ -837,7 +869,7 @@ def _build_agent_profiles(structured: Dict, language: str) -> List[AgentProfile]
 def _build_agent_dialogue(structured: Dict, language: str) -> List[AgentExchange]:
     steps = _build_agent_steps(structured, language)
     return [
-        _build_exchange(step.agent_name, _next_agent_name(step.agent_name), step, structured, language)
+        _build_exchange(step.agent_name, _next_agent_name(step.agent_name), step, structured, language, step.round_index)
         for step in steps
     ]
 
@@ -907,7 +939,13 @@ def _build_agent_profile_from_spec(spec: Dict, structured: Dict, language: str) 
     )
 
 
-def _run_agent_turn_with_rules(structured: Dict, language: str, spec: Dict, prior_steps: List[AgentStep]) -> AgentStep:
+def _run_agent_turn_with_rules(
+    structured: Dict,
+    language: str,
+    spec: Dict,
+    prior_steps: List[AgentStep],
+    round_index: int,
+) -> AgentStep:
     loc = L10N[language]
     bundle_map = {
         "Evidence Agent": structured.get("evidence_notes", [])[:4],
@@ -918,13 +956,23 @@ def _run_agent_turn_with_rules(structured: Dict, language: str, spec: Dict, prio
     }
     findings = bundle_map.get(spec["agent_name"], [])[:4]
     if prior_steps:
-        findings = [*findings, f"Prior agents: {', '.join(step.agent_name for step in prior_steps)}"][:5]
+        findings = [*findings, f"Round {round_index} context: {', '.join(step.agent_name for step in prior_steps[-4:])}"][:5]
+    actor_ref_map = {actor.get("name"): actor.get("evidence_refs", []) for actor in structured.get("actors", [])}
+    focus_map = {
+        "Evidence Agent": [item.get("id", "") for item in structured.get("clues", [])[:3]],
+        "Relationship Agent": [ref for actor in structured.get("actors", [])[:3] for ref in actor.get("evidence_refs", [])[:2]],
+        "Suspicion Agent": [ref for item in structured.get("suspect_rankings", [])[:3] for ref in actor_ref_map.get(item.get("name"), [])[:2]],
+        "Reconstruction Agent": [ref for item in structured.get("reenactment_timeline", [])[:3] for ref in item.get("evidence_refs", [])[:2]],
+        "Judge Agent": [item.get("id", "") for item in structured.get("clues", [])[:2]],
+    }
     return AgentStep(
         agent_name=spec["agent_name"],
         purpose=loc[spec["purpose_key"]],
         status="completed",
         findings=findings,
         confidence=min(0.72 + len(prior_steps) * 0.04, 0.94),
+        round_index=round_index,
+        focus_refs=[str(item) for item in focus_map.get(spec["agent_name"], []) if str(item)],
     )
 
 
@@ -936,9 +984,11 @@ def _run_agent_turn_with_llm(
     document: UploadedDocument,
     spec: Dict,
     prior_steps: List[AgentStep],
+    prior_dialogue: List[AgentExchange],
+    round_index: int,
 ) -> Optional[AgentStep]:
     system_prompt, user_prompt = _build_agent_turn_prompts(
-        structured_case, expected_outcome, detected_language, document, spec, prior_steps
+        structured_case, expected_outcome, detected_language, document, spec, prior_steps, prior_dialogue, round_index
     )
     payload = llm_client.complete_json(system_prompt, user_prompt, timeout=45)
     if not payload or not isinstance(payload.get("findings"), list):
@@ -953,6 +1003,8 @@ def _run_agent_turn_with_llm(
         status="completed",
         findings=[str(item).strip() for item in payload.get("findings", []) if str(item).strip()][:5],
         confidence=max(0.0, min(confidence, 0.99)),
+        round_index=round_index,
+        focus_refs=[str(item).strip() for item in payload.get("focus_refs", []) if str(item).strip()][:5],
     )
 
 
@@ -963,9 +1015,15 @@ def _build_agent_turn_prompts(
     document: UploadedDocument,
     spec: Dict,
     prior_steps: List[AgentStep],
+    prior_dialogue: List[AgentExchange],
+    round_index: int,
 ) -> Tuple[str, str]:
     target_language = "Simplified Chinese" if detected_language == "zh-CN" else "English"
     prior_summary = "\n".join(f"- {step.agent_name}: {' | '.join(step.findings[:3])}" for step in prior_steps) or "- None yet."
+    dialogue_summary = "\n".join(
+        f"- round {item.round_index} {item.speaker} -> {item.audience}: {item.message}"
+        for item in prior_dialogue[-8:]
+    ) or "- None yet."
     actor_block = "\n".join(
         f"- {item.get('name')}: role={item.get('role')}; refs={', '.join(item.get('evidence_refs', []))}"
         for item in structured_case.get("actors", [])[:8]
@@ -984,10 +1042,12 @@ Return one valid JSON object and nothing else.
 All natural-language values must be written in {target_language}.
 Keep the JSON keys in English.
 Stay evidence-constrained and reusable across future cases.
+You are participating in a multi-round collaboration, so react to earlier specialist findings instead of repeating them.
 
 Output schema:
 findings: [string]
 confidence: number
+focus_refs: [string]
 """.strip()
     user_prompt = f"""
 Task:
@@ -1001,6 +1061,7 @@ Current specialist:
 - agent_name: {spec['agent_name']}
 - role: {spec['role'][detected_language]}
 - purpose: {L10N[detected_language][spec['purpose_key']]}
+- round_index: {round_index} / {AGENT_COLLAB_ROUNDS}
 
 Actors:
 {actor_block}
@@ -1014,9 +1075,14 @@ Timeline:
 Prior agent outputs:
 {prior_summary}
 
+Prior dialogue:
+{dialogue_summary}
+
 Constraints:
 - Produce 3 to 5 findings.
 - Mention relevant reference ids directly inside the findings when possible.
+- In later rounds, challenge, refine, or extend previous findings instead of restating them.
+- focus_refs should contain the ids most central to this turn.
 - Keep the style reusable; do not assume facts outside the material.
 """.strip()
     return system_prompt, user_prompt
@@ -1102,7 +1168,7 @@ Output schema reminder:
     return system_prompt, user_prompt
 
 
-def _build_exchange(agent_name: str, audience: str, step: AgentStep, structured: Dict, language: str) -> AgentExchange:
+def _build_exchange(agent_name: str, audience: str, step: AgentStep, structured: Dict, language: str, round_index: int) -> AgentExchange:
     loc = L10N[language]
     top_clue = (structured.get("clues") or [{}])[0]
     top_suspect = (structured.get("suspect_rankings") or [{}])[0]
@@ -1115,11 +1181,13 @@ def _build_exchange(agent_name: str, audience: str, step: AgentStep, structured:
         "Judge Agent": loc["dialogue_5"],
     }
     return AgentExchange(
-        step_id=f"exchange_{re.sub(r'[^a-z0-9]+', '_', agent_name.lower()).strip('_')}",
+        step_id=f"exchange_r{round_index}_{re.sub(r'[^a-z0-9]+', '_', agent_name.lower()).strip('_')}",
         speaker=agent_name,
         audience=audience,
         message=step.findings[0] if step.findings else fallback.get(agent_name, loc["few_clues"]),
         stage="completed",
+        round_index=round_index,
+        evidence_refs=step.focus_refs[:4],
     )
 
 

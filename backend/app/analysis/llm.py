@@ -18,6 +18,7 @@ def _default_config() -> ModelConfig:
     return ModelConfig(
         provider_name="DeepSeek",
         base_url="https://api.deepseek.com",
+        # DeepSeek's stable reasoning alias; official docs map it to the latest thinking tier.
         model="deepseek-reasoner",
         api_key=api_key,
         enabled=bool(api_key),
@@ -119,8 +120,10 @@ class OpenAICompatibleClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.3,
         }
+        # DeepSeek's reasoning alias does not use sampling controls in the same way as chat-tuned models.
+        if "reasoner" not in self.config.model:
+            payload["temperature"] = 0.3
 
         req = request.Request(
             f"{self.config.base_url.rstrip('/')}/chat/completions",

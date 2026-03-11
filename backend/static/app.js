@@ -21,24 +21,47 @@ const els = {
 };
 
 const STEP_LABELS = {
-  parse: { title: "材料解析", detail: "抽取可分析文本、基础事实与结构化片段。" },
+  parse: { title: "材料解析", detail: "抽取原始文本、观察点与结构化片段。" },
   graph: { title: "关系图谱", detail: "构建人物、事件、线索之间的可交互关系网络。" },
-  reason: { title: "多智能体推演", detail: "按角色逐步执行分析代理，并动态回放交互。" },
-  result: { title: "综合输出", detail: "生成案情解释、嫌疑人排序与证据化时间线。" },
+  reason: { title: "多智能体协作", detail: "按轮次执行代理推演，展示交叉验证与回合日志。" },
+  result: { title: "综合输出", detail: "基于代理协作结果生成案情解释、排序与重演时间线。" },
 };
+
+const COLLABORATION_PLAN = [
+  {
+    roundIndex: 1,
+    label: "Round 1 · 初步建模",
+    agents: ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent"],
+  },
+  {
+    roundIndex: 2,
+    label: "Round 2 · 交叉校验",
+    agents: ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent", "Judge Agent"],
+  },
+];
 
 const state = {
   graphInstance: null,
   graphData: { nodes: [], links: [] },
-  selectedNodeId: null,
-  selectedLinkKey: null,
   parseData: null,
   agentSteps: [],
   dialogueItems: [],
+  selectedNodeId: null,
+  selectedLinkKey: null,
+  selectedEvidenceRef: null,
 };
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function fetchJson(url, options = {}) {
@@ -60,24 +83,25 @@ function resetWorkspace() {
   }
   state.graphInstance = null;
   state.graphData = { nodes: [], links: [] };
-  state.selectedNodeId = null;
-  state.selectedLinkKey = null;
   state.parseData = null;
   state.agentSteps = [];
   state.dialogueItems = [];
+  state.selectedNodeId = null;
+  state.selectedLinkKey = null;
+  state.selectedEvidenceRef = null;
 
   els.pipelineRoot.className = "pipeline empty";
-  els.pipelineRoot.textContent = "任务启动后，这里会依次展示解析、图谱、代理与结果阶段。";
+  els.pipelineRoot.textContent = "任务启动后，这里会依次展示解析、图谱、代理协作与综合结果。";
   els.documentRoot.className = "document empty";
   els.documentRoot.textContent = "尚未载入材料。";
   els.graphCanvas.className = "graph-shell empty";
   els.graphCanvas.textContent = "图谱尚未生成。";
   els.graphInspector.className = "inspector empty";
-  els.graphInspector.textContent = "点击节点、关系、证据引用或关联节点后，这里会显示详细说明。";
+  els.graphInspector.textContent = "点击节点、关系或证据引用后，这里会显示证据说明与关联结构。";
   els.agentRoot.className = "grid-two empty";
-  els.agentRoot.textContent = "智能体将在图谱准备完成后初始化。";
+  els.agentRoot.textContent = "代理将在图谱构建完成后初始化。";
   els.agentDialogue.className = "dialogue-feed empty";
-  els.agentDialogue.textContent = "代理交互日志会随着推理逐步出现。";
+  els.agentDialogue.textContent = "多轮代理交互日志会逐步出现在这里。";
   els.resultRoot.className = "result-grid empty";
   els.resultRoot.textContent = "最终分析结果将在这里生成。";
 }
@@ -86,11 +110,11 @@ function renderPipeline(steps) {
   els.pipelineRoot.className = "pipeline";
   els.pipelineRoot.innerHTML = steps
     .map((step) => {
-      const copy = STEP_LABELS[step.step_id] || { title: step.title, detail: step.detail };
+      const copy = STEP_LABELS[step.step_id] || { title: step.title || step.step_id, detail: step.detail || "" };
       return `
         <article class="pipeline-step ${step.status}">
           <strong>${copy.title}</strong>
-          <div class="muted">${step.status}</div>
+          <div class="muted">${escapeHtml(step.status)}</div>
           <p>${copy.detail}</p>
         </article>
       `;
@@ -98,22 +122,59 @@ function renderPipeline(steps) {
     .join("");
 }
 
-function renderDocument(document, evidenceItems, expectedOutcome) {
+function updatePipeline(reasonStatus, resultStatus) {
+  renderPipeline([
+    { step_id: "parse", status: "completed" },
+    { step_id: "graph", status: "completed" },
+    { step_id: "reason", status: reasonStatus },
+    { step_id: "result", status: resultStatus },
+  ]);
+}
+
+function renderDocument(document, evidenceItems, expectedOutcome, fullText) {
+  const materialText = escapeHtml(fullText || document.extracted_preview || "");
   els.documentRoot.className = "document";
   els.documentRoot.innerHTML = `
-    <article class="result-card">
-      <strong>${document.source_name}</strong>
-      <div class="pill-row">
-        <span class="pill">类型: ${document.source_type}</span>
-        <span class="pill">字符数: ${document.character_count}</span>
-        <span class="pill">页数: ${document.page_count ?? "未统计"}</span>
+    <article class="result-card document-card">
+      <div class="card-head">
+        <strong>${escapeHtml(document.source_name)}</strong>
+        <div class="pill-row">
+          <span class="pill">类型: ${escapeHtml(document.source_type)}</span>
+          <span class="pill">字符数: ${document.character_count}</span>
+          <span class="pill">页数: ${document.page_count ?? "未统计"}</span>
+        </div>
       </div>
-      <p><strong>分析目标:</strong> ${expectedOutcome}</p>
-      <p>${document.extracted_preview}</p>
+      <div class="scroll-pane">
+        <p><strong>分析目标:</strong> ${escapeHtml(expectedOutcome)}</p>
+        <p>${escapeHtml(document.extracted_preview)}</p>
+      </div>
     </article>
-    <article class="result-card">
-      <strong>关键证据预览</strong>
-      <ul>${evidenceItems.slice(0, 6).map((item) => `<li><strong>${item.label}</strong>（风险 ${item.risk_score}） ${item.detail}</li>`).join("")}</ul>
+    <article class="result-card document-card document-wide">
+      <div class="card-head">
+        <strong>完整材料</strong>
+        <span class="muted">支持滚动查看</span>
+      </div>
+      <pre class="scroll-pane material-text">${materialText}</pre>
+    </article>
+    <article class="result-card document-card">
+      <div class="card-head">
+        <strong>关键证据预览</strong>
+        <span class="muted">点击证据可联动图谱</span>
+      </div>
+      <div class="scroll-pane evidence-list">
+        ${evidenceItems
+          .slice(0, 12)
+          .map(
+            (item) => `
+              <button class="evidence-chip" data-ref-id="${escapeHtml(item.evidence_id)}">
+                <strong>${escapeHtml(item.label)}</strong>
+                <span>${escapeHtml(item.evidence_id)} / 风险 ${item.risk_score}</span>
+              </button>
+              <p class="evidence-excerpt">${escapeHtml(item.detail)}</p>
+            `
+          )
+          .join("")}
+      </div>
     </article>
   `;
 }
@@ -144,6 +205,28 @@ function normalizeGraph(nodes, edges) {
   return { nodes: normalizedNodes, links: normalizedLinks };
 }
 
+function refsOf(item) {
+  const refs = new Set(item.evidence_refs || []);
+  for (const detail of item.evidence_details || []) {
+    if (detail.ref_id) refs.add(detail.ref_id);
+  }
+  return refs;
+}
+
+function nodeMatchesEvidence(node, refId) {
+  return refsOf(node).has(refId);
+}
+
+function linkMatchesEvidence(link, refId) {
+  return refsOf(link).has(refId);
+}
+
+function collectEvidenceContext(refId) {
+  const nodes = state.graphData.nodes.filter((node) => nodeMatchesEvidence(node, refId));
+  const links = state.graphData.links.filter((link) => linkMatchesEvidence(link, refId));
+  return { nodes, links };
+}
+
 function neighborMap() {
   const map = new Map();
   for (const node of state.graphData.nodes) map.set(node.id, new Set());
@@ -159,59 +242,85 @@ function neighborMap() {
 function applyGraphHighlight() {
   if (!state.graphInstance) return;
   const neighbors = neighborMap();
-  const selectedNodeId = state.selectedNodeId;
-  const selectedLinkKey = state.selectedLinkKey;
+  const { selectedNodeId, selectedLinkKey, selectedEvidenceRef } = state;
+  const evidenceContext = selectedEvidenceRef ? collectEvidenceContext(selectedEvidenceRef) : { nodes: [], links: [] };
+  const evidenceNodeIds = new Set(evidenceContext.nodes.map((node) => node.id));
+  for (const link of evidenceContext.links) {
+    const source = typeof link.source === "object" ? link.source.id : link.source;
+    const target = typeof link.target === "object" ? link.target.id : link.target;
+    evidenceNodeIds.add(source);
+    evidenceNodeIds.add(target);
+  }
 
   state.graphInstance
     .nodeColor((node) => {
-      if (!selectedNodeId && !selectedLinkKey) return node.color;
+      if (selectedEvidenceRef) {
+        if (evidenceNodeIds.has(node.id)) return node.color;
+        return "rgba(160, 160, 160, 0.18)";
+      }
       if (selectedNodeId) {
         if (node.id === selectedNodeId) return "#111111";
         if (neighbors.get(selectedNodeId)?.has(node.id)) return node.color;
-        return "rgba(160, 160, 160, 0.25)";
+        return "rgba(160, 160, 160, 0.22)";
       }
       if (selectedLinkKey) {
         const activeLink = state.graphData.links.find((item) => item.key === selectedLinkKey);
         const source = typeof activeLink?.source === "object" ? activeLink.source.id : activeLink?.source;
         const target = typeof activeLink?.target === "object" ? activeLink.target.id : activeLink?.target;
         if (node.id === source || node.id === target) return node.color;
-        return "rgba(160, 160, 160, 0.25)";
+        return "rgba(160, 160, 160, 0.22)";
       }
       return node.color;
     })
     .linkColor((link) => {
-      if (!selectedNodeId && !selectedLinkKey) return "rgba(29,26,24,0.2)";
-      const source = typeof link.source === "object" ? link.source.id : link.source;
-      const target = typeof link.target === "object" ? link.target.id : link.target;
-      if (selectedLinkKey && link.key === selectedLinkKey) return "#111111";
-      if (selectedNodeId && (source === selectedNodeId || target === selectedNodeId)) return "rgba(37,77,89,0.8)";
-      return "rgba(160,160,160,0.16)";
+      if (selectedEvidenceRef) {
+        return linkMatchesEvidence(link, selectedEvidenceRef) ? "rgba(17,17,17,0.92)" : "rgba(160,160,160,0.12)";
+      }
+      if (selectedNodeId) {
+        const source = typeof link.source === "object" ? link.source.id : link.source;
+        const target = typeof link.target === "object" ? link.target.id : link.target;
+        return source === selectedNodeId || target === selectedNodeId ? "rgba(37,77,89,0.82)" : "rgba(160,160,160,0.16)";
+      }
+      if (selectedLinkKey) {
+        return link.key === selectedLinkKey ? "rgba(17,17,17,0.92)" : "rgba(160,160,160,0.16)";
+      }
+      return "rgba(29,26,24,0.2)";
     })
     .linkWidth((link) => {
-      if (selectedLinkKey && link.key === selectedLinkKey) return 5;
-      const source = typeof link.source === "object" ? link.source.id : link.source;
-      const target = typeof link.target === "object" ? link.target.id : link.target;
-      if (selectedNodeId && (source === selectedNodeId || target === selectedNodeId)) return 3.2;
+      if (selectedEvidenceRef) {
+        return linkMatchesEvidence(link, selectedEvidenceRef) ? 4.5 : 1;
+      }
+      if (selectedLinkKey) {
+        return link.key === selectedLinkKey ? 5 : 1.5 + Number(link.strength || 0.5);
+      }
+      if (selectedNodeId) {
+        const source = typeof link.source === "object" ? link.source.id : link.source;
+        const target = typeof link.target === "object" ? link.target.id : link.target;
+        return source === selectedNodeId || target === selectedNodeId ? 3.2 : 1.2;
+      }
       return 1.5 + Number(link.strength || 0.5);
     })
     .nodeVal((node) => {
-      if (selectedNodeId && node.id === selectedNodeId) return node.val * 1.4;
+      if (selectedEvidenceRef) {
+        return evidenceNodeIds.has(node.id) ? node.val * 1.35 : Math.max(5, node.val * 0.8);
+      }
+      if (selectedNodeId && node.id === selectedNodeId) return node.val * 1.45;
       return node.val;
     });
 }
 
 function renderEvidenceDetails(details = []) {
-  if (!details.length) return "<p class=\"muted\">暂无细粒度证据引用。</p>";
+  if (!details.length) return '<p class="muted">暂无细粒度证据引用。</p>';
   return `
     <div class="evidence-stack">
       ${details
         .map(
           (detail) => `
-            <button class="evidence-chip" data-ref-id="${detail.ref_id}">
-              <strong>${detail.ref_id}</strong>
-              <span>${detail.note || detail.source}</span>
+            <button class="evidence-chip" data-ref-id="${escapeHtml(detail.ref_id)}">
+              <strong>${escapeHtml(detail.ref_id)}</strong>
+              <span>${escapeHtml(detail.note || detail.source)}</span>
             </button>
-            <p class="evidence-excerpt">${detail.excerpt}</p>
+            <p class="evidence-excerpt">${escapeHtml(detail.excerpt)}</p>
           `
         )
         .join("")}
@@ -220,11 +329,49 @@ function renderEvidenceDetails(details = []) {
 }
 
 function renderRelatedNodes(nodeIds = []) {
-  if (!nodeIds.length) return "<p class=\"muted\">暂无关联节点。</p>";
-  return `
-    <div class="chips">
-      ${nodeIds.map((nodeId) => `<button class="pill link-pill" data-node-id="${nodeId}">${nodeId}</button>`).join("")}
-    </div>
+  if (!nodeIds.length) return '<p class="muted">暂无关联节点。</p>';
+  return `<div class="chips">${nodeIds.map((nodeId) => `<button class="pill link-pill" data-node-id="${escapeHtml(nodeId)}">${escapeHtml(nodeId)}</button>`).join("")}</div>`;
+}
+
+function renderEvidenceInspector(refId) {
+  const context = collectEvidenceContext(refId);
+  els.graphInspector.className = "inspector";
+  els.graphInspector.innerHTML = `
+    <article class="inspector-card">
+      <h3>证据 ${escapeHtml(refId)}</h3>
+      <p class="muted">已同步高亮相关节点与边</p>
+      <div class="chips">
+        <span class="pill">节点 ${context.nodes.length}</span>
+        <span class="pill">关系 ${context.links.length}</span>
+      </div>
+      <h4>相关节点</h4>
+      ${context.nodes.length
+        ? context.nodes
+            .map(
+              (node) => `
+                <button class="evidence-chip" data-node-id="${escapeHtml(node.id)}">
+                  <strong>${escapeHtml(node.label)}</strong>
+                  <span>${escapeHtml(node.node_type)} / ${escapeHtml(node.id)}</span>
+                </button>
+              `
+            )
+            .join("")
+        : '<p class="muted">没有直接命中的节点。</p>'}
+      <h4>相关关系</h4>
+      ${context.links.length
+        ? context.links
+            .map(
+              (link) => `
+                <article class="inspector-link-row">
+                  <strong>${escapeHtml(link.relation)}</strong>
+                  <span class="muted">${escapeHtml(typeof link.source === "object" ? link.source.id : link.source)} -> ${escapeHtml(typeof link.target === "object" ? link.target.id : link.target)}</span>
+                  <p>${escapeHtml(link.evidence || "")}</p>
+                </article>
+              `
+            )
+            .join("")
+        : '<p class="muted">没有直接命中的关系。</p>'}
+    </article>
   `;
 }
 
@@ -232,16 +379,16 @@ function renderInspector(kind, payload) {
   els.graphInspector.className = "inspector";
   if (kind === "node") {
     const attributes = Object.entries(payload.attributes || {})
-      .map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`)
+      .map(([key, value]) => `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></div>`)
       .join("");
     els.graphInspector.innerHTML = `
       <article class="inspector-card">
-        <h3>${payload.label}</h3>
-        <p class="muted">${payload.node_type}</p>
-        <p>${payload.summary || "暂无摘要。"}</p>
+        <h3>${escapeHtml(payload.label)}</h3>
+        <p class="muted">${escapeHtml(payload.node_type)}</p>
+        <p>${escapeHtml(payload.summary || "暂无摘要。")}</p>
         <dl>
-          <div><dt>node_id</dt><dd>${payload.node_id || payload.id}</dd></div>
-          <div><dt>evidence_refs</dt><dd>${(payload.evidence_refs || []).join(", ") || "无"}</dd></div>
+          <div><dt>node_id</dt><dd>${escapeHtml(payload.node_id || payload.id)}</dd></div>
+          <div><dt>evidence_refs</dt><dd>${escapeHtml((payload.evidence_refs || []).join(", ") || "无")}</dd></div>
           ${attributes}
         </dl>
         <h4>证据引用</h4>
@@ -255,12 +402,12 @@ function renderInspector(kind, payload) {
 
   els.graphInspector.innerHTML = `
     <article class="inspector-card">
-      <h3>${payload.relation}</h3>
-      <p class="muted">${payload.source} -> ${payload.target}</p>
-      <p>${payload.evidence || "暂无说明。"}</p>
+      <h3>${escapeHtml(payload.relation)}</h3>
+      <p class="muted">${escapeHtml(typeof payload.source === "object" ? payload.source.id : payload.source)} -> ${escapeHtml(typeof payload.target === "object" ? payload.target.id : payload.target)}</p>
+      <p>${escapeHtml(payload.evidence || "暂无说明。")}</p>
       <dl>
-        <div><dt>strength</dt><dd>${payload.strength}</dd></div>
-        <div><dt>evidence_refs</dt><dd>${(payload.evidence_refs || []).join(", ") || "无"}</dd></div>
+        <div><dt>strength</dt><dd>${escapeHtml(payload.strength)}</dd></div>
+        <div><dt>evidence_refs</dt><dd>${escapeHtml((payload.evidence_refs || []).join(", ") || "无")}</dd></div>
       </dl>
       <h4>证据引用</h4>
       ${renderEvidenceDetails(payload.evidence_details || [])}
@@ -273,6 +420,7 @@ function selectNodeById(nodeId) {
   if (!node) return;
   state.selectedNodeId = node.id;
   state.selectedLinkKey = null;
+  state.selectedEvidenceRef = null;
   renderInspector("node", node);
   applyGraphHighlight();
 }
@@ -280,7 +428,16 @@ function selectNodeById(nodeId) {
 function selectLink(link) {
   state.selectedNodeId = null;
   state.selectedLinkKey = link.key;
+  state.selectedEvidenceRef = null;
   renderInspector("link", link);
+  applyGraphHighlight();
+}
+
+function selectEvidenceRef(refId) {
+  state.selectedNodeId = null;
+  state.selectedLinkKey = null;
+  state.selectedEvidenceRef = refId;
+  renderEvidenceInspector(refId);
   applyGraphHighlight();
 }
 
@@ -288,7 +445,7 @@ function renderGraph(nodes, edges) {
   els.graphCanvas.className = "graph-shell";
   els.graphCanvas.innerHTML = "";
   els.graphInspector.className = "inspector empty";
-  els.graphInspector.textContent = "点击节点、关系、证据引用或关联节点后，这里会显示详细说明。";
+  els.graphInspector.textContent = "点击节点、关系或证据引用后，这里会显示证据说明与关联结构。";
 
   if (!nodes.length) {
     els.graphCanvas.classList.add("empty");
@@ -316,7 +473,7 @@ function renderGraph(nodes, edges) {
     .backgroundColor("rgba(255,255,255,0)")
     .nodeColor((node) => node.color)
     .nodeVal((node) => node.val)
-    .nodeLabel((node) => `${node.label}<br/>${node.node_type}`)
+    .nodeLabel((node) => `${escapeHtml(node.label)}<br/>${escapeHtml(node.node_type)}`)
     .linkColor(() => "rgba(29,26,24,0.2)")
     .linkWidth((link) => 1.5 + Number(link.strength || 0.5))
     .linkOpacity(0.72)
@@ -339,17 +496,17 @@ function ensureAgentCard(profile) {
   card.style.setProperty("--agent-accent", profile.accent);
   card.innerHTML = `
     <div class="persona-head">
-      <div class="persona-badge">${profile.codename.slice(0, 2).toUpperCase()}</div>
+      <div class="persona-badge">${escapeHtml(profile.codename.slice(0, 2).toUpperCase())}</div>
       <div>
-        <strong>${profile.codename}</strong>
-        <div class="muted">${profile.agent_name} / ${profile.role}</div>
+        <strong>${escapeHtml(profile.codename)}</strong>
+        <div class="muted">${escapeHtml(profile.agent_name)} / ${escapeHtml(profile.role)}</div>
       </div>
     </div>
-    <p class="persona-summary">${profile.current_focus}</p>
-    <div class="persona-state">${profile.disposition}</div>
-    <p class="muted">${profile.persistent_state}</p>
-    <ul class="memory-list">${(profile.memory_notes || []).map((item) => `<li>${item}</li>`).join("")}</ul>
-    <div class="agent-findings muted">等待执行</div>
+    <p class="persona-summary">${escapeHtml(profile.current_focus)}</p>
+    <div class="persona-state">${escapeHtml(profile.disposition)}</div>
+    <p class="muted">${escapeHtml(profile.persistent_state)}</p>
+    <ul class="memory-list">${(profile.memory_notes || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    <div class="agent-rounds"></div>
   `;
   els.agentRoot.appendChild(card);
   return card;
@@ -369,11 +526,30 @@ function setActiveAgent(agentName) {
 
 function renderAgentTurn(turn) {
   const card = ensureAgentCard(turn.agent_profile);
-  card.querySelector(".agent-findings").innerHTML = `
-    <div class="findings-title">最新产出</div>
-    <ul>${turn.agent_step.findings.map((item) => `<li>${item}</li>`).join("")}</ul>
+  const roundsRoot = card.querySelector(".agent-rounds");
+  const block = document.createElement("section");
+  block.className = "agent-round-block";
+  block.innerHTML = `
+    <div class="findings-title">Round ${turn.round_index}</div>
+    <ul>${turn.agent_step.findings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    <div class="chips">${(turn.agent_step.focus_refs || []).map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("")}</div>
     <div class="muted">confidence: ${turn.agent_step.confidence.toFixed(2)}</div>
   `;
+  roundsRoot.appendChild(block);
+}
+
+function appendSystemDialogue(label, roundIndex) {
+  els.agentDialogue.className = "dialogue-feed";
+  const node = document.createElement("article");
+  node.className = "dialogue-item dialogue-system";
+  node.innerHTML = `
+    <div class="dialogue-head">
+      <span>System</span>
+      <span>Round ${roundIndex}</span>
+    </div>
+    <p>${escapeHtml(label)}</p>
+  `;
+  els.agentDialogue.appendChild(node);
 }
 
 async function playDialogueItems(dialogue = []) {
@@ -383,10 +559,11 @@ async function playDialogueItems(dialogue = []) {
     node.className = "dialogue-item";
     node.innerHTML = `
       <div class="dialogue-head">
-        <span>${item.speaker}</span>
-        <span>${item.audience}</span>
+        <span>${escapeHtml(item.speaker)}</span>
+        <span>Round ${item.round_index} / ${escapeHtml(item.audience)}</span>
       </div>
-      <p>${item.message}</p>
+      <p>${escapeHtml(item.message)}</p>
+      <div class="chips">${(item.evidence_refs || []).map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("")}</div>
     `;
     els.agentDialogue.appendChild(node);
     els.agentDialogue.scrollTop = els.agentDialogue.scrollHeight;
@@ -400,12 +577,12 @@ function renderResults(finalResult) {
       (item, index) => `
         <article class="ranking-row">
           <div class="ranking-score">#${index + 1}</div>
-          <strong>${item.name}</strong>
-          <div class="muted">${item.role}</div>
-          <p><strong>动机:</strong> ${item.motive}</p>
-          <p><strong>手段:</strong> ${item.means}</p>
-          <p><strong>机会:</strong> ${item.opportunity}</p>
-          <ul>${item.supporting_evidence.map((evidence) => `<li>${evidence}</li>`).join("")}</ul>
+          <strong>${escapeHtml(item.name)}</strong>
+          <div class="muted">${escapeHtml(item.role)}</div>
+          <p><strong>动机:</strong> ${escapeHtml(item.motive)}</p>
+          <p><strong>手段:</strong> ${escapeHtml(item.means)}</p>
+          <p><strong>机会:</strong> ${escapeHtml(item.opportunity)}</p>
+          <ul>${item.supporting_evidence.map((evidence) => `<li>${escapeHtml(evidence)}</li>`).join("")}</ul>
         </article>
       `
     )
@@ -415,10 +592,10 @@ function renderResults(finalResult) {
     .map(
       (item) => `
         <article class="timeline-row">
-          <strong>${item.order}. ${item.phase}</strong>
-          <div class="muted">${item.time_hint} / ${item.inference_level}</div>
-          <p>${item.event}</p>
-          <div class="chips">${item.evidence_refs.map((ref) => `<button class="pill link-pill" data-ref-id="${ref}">${ref}</button>`).join("")}</div>
+          <strong>${item.order}. ${escapeHtml(item.phase)}</strong>
+          <div class="muted">${escapeHtml(item.time_hint)} / ${escapeHtml(item.inference_level)}</div>
+          <p>${escapeHtml(item.event)}</p>
+          <div class="chips">${item.evidence_refs.map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("")}</div>
         </article>
       `
     )
@@ -426,24 +603,28 @@ function renderResults(finalResult) {
 
   els.resultRoot.className = "result-grid";
   els.resultRoot.innerHTML = `
-    <article class="result-card">
-      <h3>案情解释</h3>
-      <p>${finalResult.case_explanation}</p>
-      <p><strong>综合结论:</strong> ${finalResult.verdict_summary}</p>
+    <article class="result-card result-scroll-card">
+      <div class="card-head"><h3>案情解释</h3><span class="muted">主解释与综合结论</span></div>
+      <div class="scroll-pane">
+        <p>${escapeHtml(finalResult.case_explanation)}</p>
+        <p><strong>综合结论:</strong> ${escapeHtml(finalResult.verdict_summary)}</p>
+      </div>
     </article>
-    <article class="result-card">
-      <h3>证据说明</h3>
-      <ul>${finalResult.evidence_notes.map((item) => `<li>${item}</li>`).join("")}</ul>
-      <h3>不确定性</h3>
-      <ul>${finalResult.uncertainties.map((item) => `<li>${item}</li>`).join("")}</ul>
+    <article class="result-card result-scroll-card">
+      <div class="card-head"><h3>证据说明</h3><span class="muted">可滚动查看</span></div>
+      <div class="scroll-pane">
+        <ul>${finalResult.evidence_notes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <h3>不确定性</h3>
+        <ul>${finalResult.uncertainties.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </div>
     </article>
-    <article class="result-card">
-      <h3>嫌疑人排序</h3>
-      <div class="ranking-table">${rankingRows || "<p>暂无嫌疑人排序。</p>"}</div>
+    <article class="result-card result-scroll-card">
+      <div class="card-head"><h3>嫌疑人排序</h3><span class="muted">支持滚动</span></div>
+      <div class="scroll-pane ranking-table">${rankingRows || "<p>暂无嫌疑人排序。</p>"}</div>
     </article>
-    <article class="result-card">
-      <h3>案情重演时间线</h3>
-      <div class="timeline-list">${timelineRows || "<p>暂无可用时间线。</p>"}</div>
+    <article class="result-card result-scroll-card">
+      <div class="card-head"><h3>案情重演时间线</h3><span class="muted">带证据引用</span></div>
+      <div class="scroll-pane timeline-list">${timelineRows || "<p>暂无可用时间线。</p>"}</div>
     </article>
   `;
 }
@@ -473,7 +654,9 @@ async function saveConfig() {
     body: JSON.stringify(payload),
   });
   els.apiKey.value = "";
-  els.configState.textContent = payload.enabled ? "模型配置已保存，后续任务会优先调用外部模型。" : "模型配置已保存，当前处于关闭状态。";
+  els.configState.textContent = payload.enabled
+    ? "模型配置已保存，后续任务会优先调用外部模型。"
+    : "模型配置已保存，当前处于关闭状态。";
 }
 
 async function loadSample() {
@@ -498,41 +681,45 @@ async function runWorkflow() {
     const parseData = await fetchJson("/api/case-parse", { method: "POST", body: formData });
     state.parseData = parseData;
     renderPipeline(parseData.pipeline);
-    renderDocument(parseData.document, parseData.evidence_items, parseData.expected_outcome);
+    renderDocument(parseData.document, parseData.evidence_items, parseData.expected_outcome, parseData.extracted_text);
     renderGraph(parseData.graph_nodes, parseData.graph_edges);
     renderAgentProfiles(parseData.agent_profiles || []);
 
-    setStatus("图谱已完成，正在逐步执行多智能体推演");
     els.modelBadge.textContent = "reasoning";
+    updatePipeline("in_progress", "pending");
 
-    for (const profile of parseData.agent_profiles || []) {
-      setActiveAgent(profile.agent_name);
-      setStatus(`正在执行 ${profile.agent_name}`);
-      const turn = await fetchJson("/api/case-agent-turn", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          structured_case: parseData.structured_case,
-          expected_outcome: parseData.expected_outcome,
-          detected_language: parseData.detected_language,
-          document: parseData.document,
-          agent_name: profile.agent_name,
-          prior_steps: state.agentSteps,
-        }),
-      });
-      renderAgentTurn(turn);
-      state.agentSteps.push(turn.agent_step);
-      await playDialogueItems(turn.dialogue || []);
-      await sleep(180);
+    for (const roundPlan of COLLABORATION_PLAN) {
+      appendSystemDialogue(roundPlan.label, roundPlan.roundIndex);
+      setStatus(`${roundPlan.label} 进行中`);
+      for (const agentName of roundPlan.agents) {
+        const profile = (parseData.agent_profiles || []).find((item) => item.agent_name === agentName);
+        if (!profile) continue;
+        setActiveAgent(agentName);
+        setStatus(`Round ${roundPlan.roundIndex}: ${agentName}`);
+        const turn = await fetchJson("/api/case-agent-turn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            structured_case: parseData.structured_case,
+            expected_outcome: parseData.expected_outcome,
+            detected_language: parseData.detected_language,
+            document: parseData.document,
+            agent_name: agentName,
+            round_index: roundPlan.roundIndex,
+            prior_steps: state.agentSteps,
+            prior_dialogue: state.dialogueItems,
+          }),
+        });
+        renderAgentTurn(turn);
+        state.agentSteps.push(turn.agent_step);
+        state.dialogueItems.push(...(turn.dialogue || []));
+        await playDialogueItems(turn.dialogue || []);
+        await sleep(150);
+      }
     }
 
-    renderPipeline([
-      { step_id: "parse", status: "completed" },
-      { step_id: "graph", status: "completed" },
-      { step_id: "reason", status: "completed" },
-      { step_id: "result", status: "pending" },
-    ]);
     setActiveAgent("");
+    updatePipeline("completed", "in_progress");
     setStatus("正在生成综合分析结果");
 
     const synthesis = await fetchJson("/api/case-synthesis", {
@@ -554,39 +741,35 @@ async function runWorkflow() {
   } catch (error) {
     setStatus("任务失败");
     els.pipelineRoot.className = "pipeline";
-    els.pipelineRoot.innerHTML = `<article class="pipeline-step fallback"><strong>错误</strong><p>${String(error.message).slice(0, 500)}</p></article>`;
+    els.pipelineRoot.innerHTML = `<article class="pipeline-step fallback"><strong>错误</strong><p>${escapeHtml(String(error.message).slice(0, 500))}</p></article>`;
   }
 }
 
 async function bootstrap() {
   const design = await fetchJson("/api/design");
   els.designNotes.innerHTML = [...design.borrowed_from_mirofish, ...design.rewritten_for_backtrace]
-    .map((item) => `<li>${item}</li>`)
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
     .join("");
   await loadConfig();
 }
 
-els.graphInspector.addEventListener("click", (event) => {
-  const target = event.target.closest("[data-node-id], [data-ref-id]");
-  if (!target) return;
-  if (target.dataset.nodeId) {
-    selectNodeById(target.dataset.nodeId);
+function handleRefClick(event) {
+  const nodeTarget = event.target.closest("[data-node-id]");
+  if (nodeTarget) {
+    selectNodeById(nodeTarget.dataset.nodeId);
     return;
   }
-  if (target.dataset.refId) {
-    const refId = target.dataset.refId;
-    const node = state.graphData.nodes.find((item) => (item.evidence_refs || []).includes(refId));
-    if (node) selectNodeById(node.id);
+  const refTarget = event.target.closest("[data-ref-id]");
+  if (refTarget) {
+    selectEvidenceRef(refTarget.dataset.refId);
   }
-});
+}
 
-els.resultRoot.addEventListener("click", (event) => {
-  const target = event.target.closest("[data-ref-id]");
-  if (!target) return;
-  const refId = target.dataset.refId;
-  const node = state.graphData.nodes.find((item) => (item.evidence_refs || []).includes(refId));
-  if (node) selectNodeById(node.id);
-});
+els.graphInspector.addEventListener("click", handleRefClick);
+els.documentRoot.addEventListener("click", handleRefClick);
+els.resultRoot.addEventListener("click", handleRefClick);
+els.agentRoot.addEventListener("click", handleRefClick);
+els.agentDialogue.addEventListener("click", handleRefClick);
 
 document.getElementById("saveConfig").addEventListener("click", saveConfig);
 document.getElementById("loadSample").addEventListener("click", loadSample);

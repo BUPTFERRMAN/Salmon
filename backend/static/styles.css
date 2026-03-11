@@ -266,6 +266,7 @@ body {
 
 .document {
   display: grid;
+  grid-template-columns: 0.9fr 1.3fr 0.9fr;
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -302,6 +303,12 @@ body {
 
 .graph-shell {
   overflow: hidden;
+}
+
+.inspector,
+.dialogue-feed {
+  overflow: auto;
+  max-height: 560px;
 }
 
 .graph-shell canvas {
@@ -351,6 +358,40 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;
+}
+
+.document-card,
+.result-scroll-card {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.document-wide {
+  min-height: 360px;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.scroll-pane {
+  min-height: 0;
+  overflow: auto;
+  flex: 1;
+  padding-right: 6px;
+}
+
+.material-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.65;
+  font: inherit;
 }
 
 .agent-card ul,
@@ -411,6 +452,10 @@ body {
   animation: rise-in 320ms ease forwards;
 }
 
+.dialogue-system {
+  background: rgba(180, 77, 40, 0.08);
+}
+
 .dialogue-head {
   display: flex;
   justify-content: space-between;
@@ -424,6 +469,24 @@ body {
 .timeline-list {
   display: grid;
   gap: 10px;
+}
+
+.agent-rounds {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.agent-round-block {
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(29, 26, 24, 0.05);
+}
+
+.inspector-link-row {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(29, 26, 24, 0.05);
 }
 
 .ranking-row {
@@ -480,6 +543,11 @@ body {
   padding-left: 18px;
 }
 
+.evidence-list {
+  display: grid;
+  gap: 8px;
+}
+
 @keyframes rise-in {
   to {
     opacity: 1;
@@ -490,6 +558,7 @@ body {
 @media (max-width: 1180px) {
   .studio,
   .hero,
+  .document,
   .graph-layout,
   .agent-layout {
     grid-template-columns: 1fr;

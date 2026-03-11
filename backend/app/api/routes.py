@@ -114,6 +114,8 @@ def case_agent_turn_route(payload: AgentTurnRequest) -> dict:
         document=payload.document,
         agent_name=payload.agent_name,
         prior_steps=payload.prior_steps,
+        prior_dialogue=payload.prior_dialogue,
+        round_index=payload.round_index,
     ).model_dump()
 
 
