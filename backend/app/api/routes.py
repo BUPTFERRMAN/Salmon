@@ -3,12 +3,12 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.analysis.case_reconstruction import analyze_case
-from app.analysis.case_workflow import parse_case_material, reason_case_material, run_case_workflow
+from app.analysis.case_workflow import parse_case_material, reason_case_material, run_agent_turn, run_case_workflow, synthesize_case
 from app.analysis.conversation import analyze_conversation
 from app.analysis.llm import load_model_config, model_config_view, save_model_config
 from app.analysis.sample_data import CASE_SAMPLE, CONVERSATION_SAMPLE, DEMO_LIBRARY
 from app.core.document_parser import DocumentParser
-from app.schemas import AnalysisRequest, CaseReasonRequest, ModelConfig
+from app.schemas import AnalysisRequest, AgentTurnRequest, CaseReasonRequest, CaseSynthesisRequest, ModelConfig
 
 router = APIRouter(prefix="/api")
 
@@ -27,14 +27,14 @@ def list_demos() -> list[dict]:
 def design_notes() -> dict:
     return {
         "borrowed_from_mirofish": [
-            "保留“文档解析 -> 图谱构建 -> 智能体推演 -> 综合裁决”的分层流程。",
+            "保留‘文档解析 -> 图谱构建 -> 智能体推演 -> 综合裁决’的分层流程。",
             "复用图谱先行的思路，让用户先看到人物、事件、线索和关系结构。",
             "参考工作台式双栏交互，把图谱、智能体过程和结果统一放在一个页面里。",
         ],
         "rewritten_for_backtrace": [
             "将面向未来的社会仿真改为面向过去的案件回溯与因果重建。",
             "将智能体职责改写为 Evidence / Relationship / Suspicion / Reconstruction / Judge。",
-            "优先服务 PDF 或文本材料上传，面向案情重演、历史溯源与叙事链条校验。",
+            "优先服务 PDF 或文本材料上传，面向案情重演，同时保留向更多回溯用例扩展的能力。",
         ],
     }
 
@@ -72,7 +72,7 @@ def analyze_case_route(payload: AnalysisRequest) -> dict:
 
 @router.post("/case-parse")
 async def case_parse_route(
-    expected_outcome: str = Form("请重建这起案件的形成链条。"),
+    expected_outcome: str = Form("请重建这份材料所指向的形成链条。"),
     raw_text: str = Form(""),
     file: Optional[UploadFile] = File(default=None),
 ) -> dict:
@@ -95,18 +95,42 @@ async def case_parse_route(
 
 @router.post("/case-reason")
 def case_reason_route(payload: CaseReasonRequest) -> dict:
-    if not payload.text.strip():
-        raise HTTPException(status_code=400, detail="推演阶段缺少可分析文本。")
+    if not payload.text.strip() and not payload.structured_case:
+        raise HTTPException(status_code=400, detail="推演阶段缺少可分析文本或结构化上下文。")
     return reason_case_material(
         text=payload.text,
         document=payload.document,
         expected_outcome=payload.expected_outcome,
+        structured_case=payload.structured_case,
+    ).model_dump()
+
+
+@router.post("/case-agent-turn")
+def case_agent_turn_route(payload: AgentTurnRequest) -> dict:
+    return run_agent_turn(
+        structured_case=payload.structured_case,
+        expected_outcome=payload.expected_outcome,
+        detected_language=payload.detected_language,
+        document=payload.document,
+        agent_name=payload.agent_name,
+        prior_steps=payload.prior_steps,
+    ).model_dump()
+
+
+@router.post("/case-synthesis")
+def case_synthesis_route(payload: CaseSynthesisRequest) -> dict:
+    return synthesize_case(
+        structured_case=payload.structured_case,
+        expected_outcome=payload.expected_outcome,
+        detected_language=payload.detected_language,
+        document=payload.document,
+        agent_steps=payload.agent_steps,
     ).model_dump()
 
 
 @router.post("/case-workflow")
 async def case_workflow_route(
-    expected_outcome: str = Form("请重建这起案件的形成链条。"),
+    expected_outcome: str = Form("请重建这份材料所指向的形成链条。"),
     raw_text: str = Form(""),
     file: Optional[UploadFile] = File(default=None),
 ) -> dict:

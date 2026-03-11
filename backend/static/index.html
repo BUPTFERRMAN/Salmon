@@ -12,19 +12,17 @@
       <section class="hero">
         <div>
           <p class="eyebrow">Salmon</p>
-          <h1>Reconstruct the past, not just predict the future.</h1>
+          <h1>用于案情回溯与因果重建的多智能体工作台</h1>
           <p class="subcopy">
-            Salmon is a multi-agent workspace for case replay, historical backtracing, and causal-chain analysis.
-            It turns documents and raw clues into structured evidence through staged parsing, graph construction,
-            reverse reasoning, and synthesis, so you can inspect how an outcome came to be.
+            Salmon 面向案情重演、历史回溯与复杂局面成因分析。系统先对文档进行解析，构建人物、事件、线索之间的关系图谱，
+            再由多智能体逐步完成证据审计、关系建模、嫌疑排序、时间线回推与综合判断，帮助用户观察结果是如何形成的。
           </p>
         </div>
         <div class="hero-note">
-          <span>Why Salmon</span>
-          <strong>Reverse-First, Evidence-Constrained</strong>
+          <span>Project Summary</span>
+          <strong>Reverse-First Reconstruction</strong>
           <p>
-            Built for reconstruction rather than prediction: generate competing explanations, expose key turning points,
-            and keep uncertainty visible.
+            以回溯为起点，以证据为约束。输出主解释、备选解释、关键证据、嫌疑排序与重演时间线，并为后续更多回溯用例保留扩展空间。
           </p>
         </div>
       </section>
@@ -74,7 +72,7 @@
             </label>
             <label class="field">
               <span>或直接输入文本</span>
-              <textarea id="rawText" rows="14" placeholder="粘贴案情材料、证言、新闻、纪要或调查记录"></textarea>
+              <textarea id="rawText" rows="14" placeholder="粘贴案情材料、证言、纪要、记录或其他文本内容"></textarea>
             </label>
             <button id="runWorkflow" class="primary">启动重演</button>
           </article>
@@ -102,18 +100,18 @@
             <div id="documentRoot" class="document empty">尚未载入材料。</div>
             <div class="graph-layout">
               <div id="graphCanvas" class="graph-shell empty">图谱尚未生成。</div>
-              <aside id="graphInspector" class="inspector empty">点击节点或关系后，这里将显示详细属性与证据说明。</aside>
+              <aside id="graphInspector" class="inspector empty">点击节点、关系、证据引用或关联节点后，这里会显示详细说明。</aside>
             </div>
           </article>
 
           <article class="panel wide">
             <div class="panel-head">
-              <h2>智能体协作</h2>
-              <span class="muted">先渲染角色，再展示交互与结论收敛过程</span>
+              <h2>多智能体协作</h2>
+              <span class="muted">先渲染角色，再按代理顺序逐步执行推演</span>
             </div>
             <div class="agent-layout">
-              <div id="agentRoot" class="grid-two empty">智能体角色将在这里初始化。</div>
-              <div id="agentDialogue" class="dialogue-feed empty">智能体交互日志将在这里动态播放。</div>
+              <div id="agentRoot" class="grid-two empty">智能体将在图谱准备完成后初始化。</div>
+              <div id="agentDialogue" class="dialogue-feed empty">代理交互日志会随着推理逐步出现。</div>
             </div>
           </article>
 

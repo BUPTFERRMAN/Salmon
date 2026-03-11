@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -121,6 +121,13 @@ class UploadedDocument(BaseModel):
     extracted_preview: str
 
 
+class EvidenceDetail(BaseModel):
+    ref_id: str
+    excerpt: str
+    source: str
+    note: str = ""
+
+
 class GraphNode(BaseModel):
     node_id: str
     label: str
@@ -128,6 +135,8 @@ class GraphNode(BaseModel):
     summary: str
     suspicion_score: float = 0.0
     evidence_refs: List[str] = Field(default_factory=list)
+    evidence_details: List[EvidenceDetail] = Field(default_factory=list)
+    related_node_ids: List[str] = Field(default_factory=list)
     attributes: Dict[str, str] = Field(default_factory=dict)
 
 
@@ -136,6 +145,8 @@ class GraphEdge(BaseModel):
     target: str
     relation: str
     evidence: str
+    evidence_refs: List[str] = Field(default_factory=list)
+    evidence_details: List[EvidenceDetail] = Field(default_factory=list)
     strength: float = 0.5
 
 
@@ -217,9 +228,11 @@ class CaseParseResponse(BaseModel):
     expected_outcome: str
     detected_language: str
     extracted_text: str
+    structured_case: Dict[str, Any] = Field(default_factory=dict)
     graph_nodes: List[GraphNode]
     graph_edges: List[GraphEdge]
     evidence_items: List[EvidenceItem]
+    agent_profiles: List[AgentProfile] = Field(default_factory=list)
     pipeline: List[PipelineStep]
 
 
@@ -227,6 +240,44 @@ class CaseReasonRequest(BaseModel):
     text: str = Field(..., min_length=1)
     document: UploadedDocument
     expected_outcome: Optional[str] = None
+    structured_case: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentTurnRequest(BaseModel):
+    structured_case: Dict[str, Any] = Field(default_factory=dict)
+    expected_outcome: str
+    detected_language: str
+    document: UploadedDocument
+    agent_name: str
+    prior_steps: List[AgentStep] = Field(default_factory=list)
+
+
+class AgentTurnResponse(BaseModel):
+    mode: str = "case_agent_turn"
+    expected_outcome: str
+    detected_language: str
+    model_status: str
+    pipeline: List[PipelineStep]
+    agent_profile: AgentProfile
+    agent_step: AgentStep
+    dialogue: List[AgentExchange]
+
+
+class CaseSynthesisRequest(BaseModel):
+    structured_case: Dict[str, Any] = Field(default_factory=dict)
+    expected_outcome: str
+    detected_language: str
+    document: UploadedDocument
+    agent_steps: List[AgentStep] = Field(default_factory=list)
+
+
+class CaseSynthesisResponse(BaseModel):
+    mode: str = "case_synthesis"
+    expected_outcome: str
+    detected_language: str
+    model_status: str
+    pipeline: List[PipelineStep]
+    final_result: CaseFinalResult
 
 
 class CaseReasonResponse(BaseModel):

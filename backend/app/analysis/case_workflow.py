@@ -7,10 +7,13 @@ from app.schemas import (
     AgentExchange,
     AgentProfile,
     AgentStep,
+    AgentTurnResponse,
     CaseFinalResult,
     CaseParseResponse,
     CaseReasonResponse,
+    CaseSynthesisResponse,
     CaseWorkflowResponse,
+    EvidenceDetail,
     EvidenceItem,
     GraphEdge,
     GraphNode,
@@ -46,11 +49,17 @@ L10N = {
         "dialogue_2": "\u76ee\u524d\u6700\u503c\u5f97\u76ef\u4f4f\u7684\u662f {suspect}\uff0c\u56e0\u4e3a\u4ed6\u66f4\u8d34\u8fd1\u5173\u952e\u5173\u7cfb\u548c\u5229\u76ca\u94fe\u3002",
         "dialogue_3": "\u8bf7\u4f18\u5148\u9a8c\u8bc1 {suspect} \u7684\u52a8\u673a\u3001\u624b\u6bb5\u548c\u673a\u4f1a\u662f\u5426\u80fd\u540c\u65f6\u8986\u76d6\u591a\u6761\u7ebf\u7d22\u3002",
         "dialogue_4": "\u65f6\u95f4\u7ebf\u8d77\u70b9\u662f\u201c{event}\u201d\uff0c\u5b83\u50cf\u662f\u540e\u7eed\u5173\u952e\u4e8b\u4ef6\u7684\u94fa\u57ab\u3002",
+        "dialogue_5": "\u6211\u4f1a\u5728\u7efc\u5408\u5224\u65ad\u4e2d\u4fdd\u7559\u4e3b\u5047\u8bbe\u4e0e\u4e0d\u786e\u5b9a\u6027\u3002",
         "role_generic": "\u5173\u952e\u76f8\u5173\u65b9",
         "relation_generic": "{name} \u4f4d\u4e8e\u6848\u4ef6\u5173\u952e\u5173\u7cfb\u94fe\u4e2d\uff0c\u89d2\u8272\u5224\u65ad\u4e3a {role}\u3002",
         "motive_generic": "{name} \u53ef\u80fd\u53d7\u5230\u5229\u76ca\u3001\u81ea\u4fdd\u3001\u63a7\u5236\u53d9\u4e8b\u6216\u5173\u7cfb\u51b2\u7a81\u7684\u9a71\u52a8\u3002",
         "means_generic": "{role} \u53ef\u80fd\u5177\u5907\u63a5\u8fd1\u73b0\u573a\u3001\u88c5\u7f6e\u3001\u4fe1\u606f\u6216\u5173\u952e\u901a\u9053\u7684\u80fd\u529b\u3002",
         "opportunity_generic": "\u6750\u6599\u4e2d\u81f3\u5c11\u6709 {count} \u5904\u8282\u70b9\u4e0e\u5176\u76f4\u63a5\u76f8\u5173\uff0c\u8bf4\u660e\u5176\u63a5\u8fd1\u5173\u952e\u65f6\u70b9\u3002",
+        "agent_context": "\u5f53\u524d\u4ee3\u7406\u6b63\u5728 Salmon \u7684\u56de\u6eaf\u91cd\u5efa\u6d41\u7a0b\u4e2d\u5de5\u4f5c\u3002",
+        "actor_note": "\u4e0e {name} \u76f8\u5173\u7684\u7247\u6bb5\u5171 {count} \u5904\u3002",
+        "event_note": "\u8be5\u8282\u70b9\u6765\u81ea\u65f6\u95f4\u7ebf\u7247\u6bb5 {ref_id}\u3002",
+        "clue_note": "\u8be5\u8282\u70b9\u5bf9\u5e94\u89c2\u5bdf\u70b9 {ref_id}\u3002",
+        "edge_note": "\u8be5\u5173\u7cfb\u7531\u6750\u6599\u7247\u6bb5 {refs} \u652f\u6491\u3002",
     },
     "en": {
         "default_outcome": "Please reconstruct how this case was formed.",
@@ -77,27 +86,62 @@ L10N = {
         "dialogue_2": "{suspect} sits closest to the strongest relationship and incentive chain.",
         "dialogue_3": "Please test whether {suspect} covers motive, means, opportunity, and clue overlap.",
         "dialogue_4": "The timeline begins with '{event}', which likely primes the later event.",
+        "dialogue_5": "I will keep both the leading hypothesis and the uncertainty visible in the synthesis.",
         "role_generic": "Key stakeholder",
         "relation_generic": "{name} appears inside the central relationship chain as {role}.",
         "motive_generic": "{name} may be driven by gain, self-protection, narrative control, or relationship conflict.",
         "means_generic": "The {role} role may provide access to the scene, devices, information, or key pathways.",
         "opportunity_generic": "The material links this actor to at least {count} relevant points near critical moments.",
+        "agent_context": "This agent is working inside Salmon's reconstruction flow.",
+        "actor_note": "There are {count} fragments directly tied to {name}.",
+        "event_note": "This node comes from timeline fragment {ref_id}.",
+        "clue_note": "This node corresponds to observation point {ref_id}.",
+        "edge_note": "This relation is supported by material fragments {refs}.",
     },
 }
 
 AGENTS = [
-    ("Evidence Agent", "agent_evidence"),
-    ("Relationship Agent", "agent_relationship"),
-    ("Suspicion Agent", "agent_suspicion"),
-    ("Reconstruction Agent", "agent_reconstruction"),
-    ("Judge Agent", "agent_judge"),
+    {
+        "agent_name": "Evidence Agent",
+        "purpose_key": "agent_evidence",
+        "codename": "Trace Lens",
+        "role": {"zh-CN": "证据审计", "en": "Evidence Audit"},
+        "disposition": {"zh-CN": "冷静、保守", "en": "Calm, conservative"},
+        "accent": "#b44d28",
+    },
+    {
+        "agent_name": "Relationship Agent",
+        "purpose_key": "agent_relationship",
+        "codename": "Link Weaver",
+        "role": {"zh-CN": "关系建模", "en": "Relationship Modeling"},
+        "disposition": {"zh-CN": "结构化、关联优先", "en": "Structured, link-first"},
+        "accent": "#254d59",
+    },
+    {
+        "agent_name": "Suspicion Agent",
+        "purpose_key": "agent_suspicion",
+        "codename": "Rank Signal",
+        "role": {"zh-CN": "嫌疑排序", "en": "Suspicion Ranking"},
+        "disposition": {"zh-CN": "比较驱动、筛选优先", "en": "Comparative, ranking-first"},
+        "accent": "#8b5e34",
+    },
+    {
+        "agent_name": "Reconstruction Agent",
+        "purpose_key": "agent_reconstruction",
+        "codename": "Time Thread",
+        "role": {"zh-CN": "因果拼接", "en": "Causal Reconstruction"},
+        "disposition": {"zh-CN": "时序驱动、链路敏感", "en": "Timeline-driven, chain-sensitive"},
+        "accent": "#3e6b6f",
+    },
+    {
+        "agent_name": "Judge Agent",
+        "purpose_key": "agent_judge",
+        "codename": "Final Frame",
+        "role": {"zh-CN": "综合裁决", "en": "Final Synthesis"},
+        "disposition": {"zh-CN": "平衡、审慎", "en": "Balanced, cautious"},
+        "accent": "#c59c3d",
+    },
 ]
-
-ZH_KEYWORDS = {
-    "camera": ["\u76d1\u63a7", "\u76f2\u533a"],
-    "record": ["\u7f3a\u5931", "\u5c01\u5b58", "\u7be1\u6539"],
-    "mechanism": ["\u5bc6\u5ba4", "\u901a\u98ce\u53e3", "\u5047\u94c3\u7ef3", "\u53e3\u54e8", "\u6591\u70b9\u5e26\u5b50"],
-}
 
 ROLE_KEYWORDS = ["\u533b\u751f", "\u6559\u6388", "\u8b66\u5bdf", "\u7ee7\u7236", "\u6bcd\u4eb2", "\u59b9\u59b9", "\u59d0\u59d0", "\u4fdd\u5b89", "\u7ecf\u7406", "\u4e3b\u4efb", "\u7ef4\u4fee", "\u62a4\u58eb", "\u53f8\u673a", "\u8d22\u52a1"]
 
@@ -105,30 +149,33 @@ RISK_WORDS = {
     "missing": 3,
     "cover-up": 4,
     "tamper": 4,
-    "locked room": 4,
-    "ventilator": 3,
-    "bell rope": 3,
-    "whistle": 3,
+    "timeline gap": 3,
+    "device": 2,
+    "access": 2,
     "insurance": 2,
-    "\u7edf\u4e00\u53e3\u5f84": 4,
-    "\u5c01\u5b58": 3,
-    "\u5f02\u5e38": 2,
-    "\u7f3a\u5931": 3,
-    "\u7be1\u6539": 4,
-    "\u76d1\u63a7\u76f2\u533a": 4,
-    "\u5bc6\u5ba4": 4,
-    "\u901a\u98ce\u53e3": 3,
-    "\u5047\u94c3\u7ef3": 3,
-    "\u53e3\u54e8": 3,
-    "\u9057\u8a00": 2,
-    "\u4fdd\u9669": 2,
-    "\u63d0\u524d": 2,
+    "统一口径": 4,
+    "封存": 3,
+    "异常": 2,
+    "缺失": 3,
+    "篡改": 4,
+    "监控盲区": 4,
+    "时间差": 3,
+    "通道": 2,
+    "装置": 2,
+    "保险": 2,
+    "提前": 2,
 }
 
 
 def run_case_workflow(text: str, document: UploadedDocument, expected_outcome: Optional[str]) -> CaseWorkflowResponse:
     parse_stage = parse_case_material(text, document, expected_outcome)
-    reason_stage = reason_case_material(text, document, expected_outcome)
+    reason_stage = reason_case_material(
+        text=text,
+        document=document,
+        expected_outcome=expected_outcome,
+        structured_case=parse_stage.structured_case,
+        detected_language=parse_stage.detected_language,
+    )
     return CaseWorkflowResponse(
         document=document,
         expected_outcome=reason_stage.expected_outcome,
@@ -148,43 +195,53 @@ def run_case_workflow(text: str, document: UploadedDocument, expected_outcome: O
 def parse_case_material(text: str, document: UploadedDocument, expected_outcome: Optional[str]) -> CaseParseResponse:
     language = detect_language(text, expected_outcome)
     structured = _extract_with_rules(text, document, _outcome(expected_outcome, language), language)
-    graph_nodes, graph_edges = _build_graph(structured)
+    graph_nodes, graph_edges = _build_graph(structured, document.source_name, language)
     return CaseParseResponse(
         document=document,
         expected_outcome=_outcome(expected_outcome, language),
         detected_language=language,
         extracted_text=text,
+        structured_case=structured,
         graph_nodes=graph_nodes,
         graph_edges=graph_edges,
         evidence_items=_build_evidence_items(structured, document.source_name),
-        pipeline=_pipeline("pending"),
+        agent_profiles=_build_agent_profiles(structured, language),
+        pipeline=_pipeline("pending", "pending"),
     )
 
 
-def reason_case_material(text: str, document: UploadedDocument, expected_outcome: Optional[str]) -> CaseReasonResponse:
-    language = detect_language(text, expected_outcome)
+def reason_case_material(
+    text: str,
+    document: UploadedDocument,
+    expected_outcome: Optional[str],
+    structured_case: Optional[Dict] = None,
+    detected_language: Optional[str] = None,
+) -> CaseReasonResponse:
+    language = detected_language or detect_language(text, expected_outcome)
     outcome = _outcome(expected_outcome, language)
-    llm_client = OpenAICompatibleClient()
-    structured = None
-    model_status = "rules_only"
+    structured = structured_case or _build_structured_case(text, document, outcome, language)
+    agent_steps: List[AgentStep] = []
+    agent_dialogue: List[AgentExchange] = []
+    statuses: List[str] = []
 
-    if llm_client.enabled:
-        structured = _extract_with_llm(llm_client, text, outcome, document, language)
-        if structured:
-            model_status = "model_plus_rules"
+    for spec in AGENTS:
+        turn = run_agent_turn(structured, outcome, language, document, spec["agent_name"], agent_steps)
+        agent_steps.append(turn.agent_step)
+        agent_dialogue.extend(turn.dialogue)
+        statuses.append(turn.model_status)
 
-    if not structured:
-        structured = _extract_with_rules(text, document, outcome, language)
+    synthesis = synthesize_case(structured, outcome, language, document, agent_steps)
+    model_status = "model_plus_rules" if any(status == "model_plus_rules" for status in [*statuses, synthesis.model_status]) else "rules_only"
 
     return CaseReasonResponse(
         expected_outcome=outcome,
         detected_language=language,
         model_status=model_status,
-        pipeline=_pipeline("completed" if model_status == "model_plus_rules" else "fallback"),
+        pipeline=_pipeline("completed", "completed"),
         agent_profiles=_build_agent_profiles(structured, language),
-        agents=_build_agent_steps(structured, language),
-        agent_dialogue=_build_agent_dialogue(structured, language),
-        final_result=_build_final_result(structured),
+        agents=agent_steps,
+        agent_dialogue=agent_dialogue,
+        final_result=synthesis.final_result,
     )
 
 
@@ -199,13 +256,80 @@ def _outcome(expected_outcome: Optional[str], language: str) -> str:
     return (expected_outcome or L10N[language]["default_outcome"]).strip()
 
 
-def _pipeline(reason_status: str) -> List[PipelineStep]:
+def _pipeline(reason_status: str, result_status: str) -> List[PipelineStep]:
     return [
         PipelineStep(step_id="parse", title="parse", detail="document parsed", status="completed"),
         PipelineStep(step_id="graph", title="graph", detail="graph ready", status="completed"),
         PipelineStep(step_id="reason", title="reason", detail="agents reasoning", status=reason_status),
-        PipelineStep(step_id="result", title="result", detail="final synthesis", status="completed" if reason_status != "pending" else "pending"),
+        PipelineStep(step_id="result", title="result", detail="final synthesis", status=result_status),
     ]
+
+
+def _build_structured_case(text: str, document: UploadedDocument, outcome: str, language: str) -> Dict:
+    llm_client = OpenAICompatibleClient()
+    if llm_client.enabled:
+        structured = _extract_with_llm(llm_client, text, outcome, document, language)
+        if structured:
+            return structured
+    return _extract_with_rules(text, document, outcome, language)
+
+
+def run_agent_turn(
+    structured_case: Dict,
+    expected_outcome: str,
+    detected_language: str,
+    document: UploadedDocument,
+    agent_name: str,
+    prior_steps: List[AgentStep],
+) -> AgentTurnResponse:
+    spec = _agent_spec(agent_name)
+    llm_client = OpenAICompatibleClient()
+    profile = _build_agent_profile_from_spec(spec, structured_case, detected_language)
+    step = None
+    model_status = "rules_only"
+
+    if llm_client.enabled:
+        step = _run_agent_turn_with_llm(llm_client, structured_case, expected_outcome, detected_language, document, spec, prior_steps)
+        if step:
+            model_status = "model_plus_rules"
+
+    if not step:
+        step = _run_agent_turn_with_rules(structured_case, detected_language, spec, prior_steps)
+
+    return AgentTurnResponse(
+        expected_outcome=expected_outcome,
+        detected_language=detected_language,
+        model_status=model_status,
+        pipeline=_pipeline("in_progress", "pending"),
+        agent_profile=profile,
+        agent_step=step,
+        dialogue=[_build_exchange(agent_name, _next_agent_name(agent_name), step, structured_case, detected_language)],
+    )
+
+
+def synthesize_case(
+    structured_case: Dict,
+    expected_outcome: str,
+    detected_language: str,
+    document: UploadedDocument,
+    agent_steps: List[AgentStep],
+) -> CaseSynthesisResponse:
+    llm_client = OpenAICompatibleClient()
+    final_result = None
+    model_status = "rules_only"
+    if llm_client.enabled:
+        final_result = _run_final_synthesis_with_llm(llm_client, structured_case, expected_outcome, detected_language, document, agent_steps)
+        if final_result:
+            model_status = "model_plus_rules"
+    if not final_result:
+        final_result = _build_final_result(structured_case, agent_steps)
+    return CaseSynthesisResponse(
+        expected_outcome=expected_outcome,
+        detected_language=detected_language,
+        model_status=model_status,
+        pipeline=_pipeline("completed", "completed"),
+        final_result=final_result,
+    )
 
 
 def _extract_with_llm(
@@ -242,16 +366,29 @@ def _build_case_llm_prompts(text: str, outcome: str, document: UploadedDocument,
     background_block = "\n".join(f"- {item}" for item in sections["background"]) or "- None explicitly provided."
     clue_block = "\n".join(f"- {item}" for item in sections["clues"]) or "- None explicitly provided."
     extra_block = "\n".join(f"- {item}" for item in sections["extra"]) or "- No extra sections."
+    mode = _classify_prompt_mode(text, outcome)
+    if mode == "case_reenactment":
+        extra_constraints = """
+- This request is a case reenactment task. Preserve suspect ranking, timeline reconstruction, and evidence coverage.
+- Prefer one mechanism that explains multiple clues at once.
+- If the material includes space, access, device, time-gap, or other structural anomalies, test whether they combine into one mechanism chain.
+- Suspect ranking must clearly state which material supports motive, means, opportunity, and clue coverage.
+""".strip()
+    else:
+        extra_constraints = """
+- This request is a general backtracing task rather than a pure criminal case.
+- Focus on causal structure, competing explanations, and hidden turning points.
+- Reuse the same schema without forcing crime-specific assumptions.
+""".strip()
 
     system_prompt = f"""
-You are BackTrace's case-reenactment structuring agent.
+You are Salmon's reconstruction structuring agent.
 Return one valid JSON object and nothing else.
 All natural-language values in the JSON must be written in {target_language}.
 Keep the JSON keys in English.
 Treat background as context, clues as the main evidence layer, and never convert inference into fact.
-Prefer one mechanism that explains multiple clues at once.
-If the case resembles a locked-room or impossible-crime pattern, explain the mechanism that closes the gap.
-Suspect ranking must be based on motive, means, opportunity, and clue coverage.
+Build a reusable structured graph that can support downstream multi-agent reasoning.
+When ranking candidates, use motive, means, opportunity, and clue coverage when relevant.
 
 Output schema:
 background_summary: string
@@ -288,9 +425,7 @@ Raw material:
 {text[:18000]}
 
 Extra constraints:
-- If multiple clues can be explained by one shared mechanism, make that mechanism explicit.
-- If there is a dying message, strange sound, fake device, fixed furniture, vent, passage, or other structural anomaly, test whether they form one integrated device chain.
-- Suspect ranking must clearly state which material supports motive, means, opportunity, and clue coverage.
+{extra_constraints}
 """.strip()
     return system_prompt, user_prompt
 
@@ -314,6 +449,27 @@ def _split_case_sections(text: str) -> Dict[str, List[str]]:
             continue
         sections[current].append(line.lstrip("-* ").strip())
     return sections
+
+
+def _classify_prompt_mode(text: str, outcome: str) -> str:
+    sample = f"{outcome}\n{text[:4000]}".lower()
+    case_keywords = [
+        "案情",
+        "案件",
+        "嫌疑",
+        "凶手",
+        "证据",
+        "线索",
+        "案发",
+        "案情重演",
+        "suspect",
+        "murder",
+        "crime",
+        "evidence",
+        "reenact",
+    ]
+    hits = sum(1 for keyword in case_keywords if keyword in sample)
+    return "case_reenactment" if hits >= 2 else "general_backtrace"
 
 
 def _normalize_llm_payload(payload: Dict) -> Dict:
@@ -391,6 +547,14 @@ def _extract_with_rules(text: str, document: UploadedDocument, outcome: str, lan
                 "description": detail,
                 "actors": actors,
                 "evidence_refs": [event_id],
+                "evidence_details": [
+                    {
+                        "ref_id": event_id,
+                        "excerpt": detail[:220],
+                        "source": document.source_name,
+                        "note": loc["event_note"].format(ref_id=event_id),
+                    }
+                ],
                 "inference_level": "direct" if actors else "mixed",
             }
         )
@@ -404,11 +568,19 @@ def _extract_with_rules(text: str, document: UploadedDocument, outcome: str, lan
                     "actors": actors,
                     "event_ids": [event_id],
                     "risk_level": score,
-                    "evidence_refs": [event_id],
+                    "evidence_refs": [event_id, f"clue_{len(clues) + 1:02d}"],
+                    "evidence_details": [
+                        {
+                            "ref_id": event_id,
+                            "excerpt": detail[:220],
+                            "source": document.source_name,
+                            "note": loc["clue_note"].format(ref_id=f"clue_{len(clues) + 1:02d}"),
+                        }
+                    ],
                 }
             )
 
-    actors = _build_actor_cards(actor_counter, actor_evidence_map, clues, language)
+    actors = _build_actor_cards(actor_counter, actor_evidence_map, clues, language, document.source_name)
     suspect_rankings = _build_suspect_rankings(actors, events, language)
     timeline = _build_reenactment_timeline(events)
 
@@ -426,7 +598,13 @@ def _extract_with_rules(text: str, document: UploadedDocument, outcome: str, lan
     }
 
 
-def _build_actor_cards(actor_counter: Counter, actor_evidence_map: Dict[str, List[str]], clues: List[Dict], language: str) -> List[Dict]:
+def _build_actor_cards(
+    actor_counter: Counter,
+    actor_evidence_map: Dict[str, List[str]],
+    clues: List[Dict],
+    language: str,
+    source_name: str,
+) -> List[Dict]:
     loc = L10N[language]
     actor_names = [name for name, _ in actor_counter.most_common(8)] or [loc["core_actor"]]
     actors = []
@@ -445,6 +623,15 @@ def _build_actor_cards(actor_counter: Counter, actor_evidence_map: Dict[str, Lis
                 "means": loc["means_generic"].format(role=role),
                 "opportunity": loc["opportunity_generic"].format(count=len(mentions)),
                 "evidence_refs": mentions[:4],
+                "evidence_details": [
+                    {
+                        "ref_id": ref_id,
+                        "excerpt": loc["actor_note"].format(name=name, count=len(mentions)),
+                        "source": source_name,
+                        "note": loc["event_note"].format(ref_id=ref_id),
+                    }
+                    for ref_id in mentions[:4]
+                ],
             }
         )
     return actors
@@ -485,11 +672,13 @@ def _build_reenactment_timeline(events: List[Dict]) -> List[Dict]:
     ]
 
 
-def _build_graph(structured: Dict) -> Tuple[List[GraphNode], List[GraphEdge]]:
+def _build_graph(structured: Dict, source_name: str, language: str) -> Tuple[List[GraphNode], List[GraphEdge]]:
+    loc = L10N[language]
     nodes: List[GraphNode] = []
     edges: List[GraphEdge] = []
     actor_ids: Dict[str, str] = {}
     required_event_ids = set()
+    related_nodes: Dict[str, set] = defaultdict(set)
 
     for clue in structured.get("clues", [])[:10]:
         required_event_ids.update(clue.get("event_ids", []))
@@ -505,6 +694,7 @@ def _build_graph(structured: Dict) -> Tuple[List[GraphNode], List[GraphEdge]]:
                 summary=actor["relation"],
                 suspicion_score=float(actor["suspicion_score"]),
                 evidence_refs=actor.get("evidence_refs", []),
+                evidence_details=[EvidenceDetail.model_validate(item) for item in actor.get("evidence_details", [])],
                 attributes={
                     "role": actor["role"],
                     "motive": actor["motive"],
@@ -531,17 +721,30 @@ def _build_graph(structured: Dict) -> Tuple[List[GraphNode], List[GraphEdge]]:
                 summary=event["time_hint"],
                 suspicion_score=0.0,
                 evidence_refs=event.get("evidence_refs", []),
+                evidence_details=[EvidenceDetail.model_validate(item) for item in event.get("evidence_details", [])],
                 attributes={"time_hint": event["time_hint"], "inference_level": event["inference_level"]},
             )
         )
         for actor_name in event.get("actors", []):
             if actor_name in actor_ids:
+                related_nodes[actor_ids[actor_name]].add(event["id"])
+                related_nodes[event["id"]].add(actor_ids[actor_name])
                 edges.append(
                     GraphEdge(
                         source=actor_ids[actor_name],
                         target=event["id"],
                         relation="involved_in",
                         evidence=event["description"],
+                        evidence_refs=event.get("evidence_refs", []),
+                        evidence_details=[
+                            EvidenceDetail(
+                                ref_id=ref_id,
+                                excerpt=event["description"][:220],
+                                source=source_name,
+                                note=loc["edge_note"].format(refs=", ".join(event.get("evidence_refs", []))),
+                            )
+                            for ref_id in event.get("evidence_refs", [])
+                        ],
                         strength=0.82,
                     )
                 )
@@ -555,15 +758,43 @@ def _build_graph(structured: Dict) -> Tuple[List[GraphNode], List[GraphEdge]]:
                 summary=clue["detail"],
                 suspicion_score=float(clue["risk_level"] * 10),
                 evidence_refs=clue.get("evidence_refs", []),
+                evidence_details=[EvidenceDetail.model_validate(item) for item in clue.get("evidence_details", [])],
                 attributes={"risk_level": str(clue["risk_level"]), "detail": clue["detail"]},
             )
         )
         for event_id in clue.get("event_ids", []):
             if event_id in event_ids:
-                edges.append(GraphEdge(source=event_id, target=clue["id"], relation="produces_clue", evidence=clue["detail"], strength=0.87))
+                related_nodes[event_id].add(clue["id"])
+                related_nodes[clue["id"]].add(event_id)
+                edges.append(
+                    GraphEdge(
+                        source=event_id,
+                        target=clue["id"],
+                        relation="produces_clue",
+                        evidence=clue["detail"],
+                        evidence_refs=clue.get("evidence_refs", []),
+                        evidence_details=[EvidenceDetail.model_validate(item) for item in clue.get("evidence_details", [])],
+                        strength=0.87,
+                    )
+                )
         for actor_name in clue.get("actors", []):
             if actor_name in actor_ids:
-                edges.append(GraphEdge(source=actor_ids[actor_name], target=clue["id"], relation="linked_to", evidence=clue["detail"], strength=0.74))
+                related_nodes[actor_ids[actor_name]].add(clue["id"])
+                related_nodes[clue["id"]].add(actor_ids[actor_name])
+                edges.append(
+                    GraphEdge(
+                        source=actor_ids[actor_name],
+                        target=clue["id"],
+                        relation="linked_to",
+                        evidence=clue["detail"],
+                        evidence_refs=clue.get("evidence_refs", []),
+                        evidence_details=[EvidenceDetail.model_validate(item) for item in clue.get("evidence_details", [])],
+                        strength=0.74,
+                    )
+                )
+
+    for node in nodes:
+        node.related_node_ids = sorted(related_nodes.get(node.node_id, set()))
 
     return nodes, edges
 
@@ -596,66 +827,23 @@ def _build_evidence_items(structured: Dict, source_name: str) -> List[EvidenceIt
 
 
 def _build_agent_steps(structured: Dict, language: str) -> List[AgentStep]:
-    loc = L10N[language]
-    bundles = [
-        structured.get("evidence_notes", [])[:4],
-        [f"{actor['name']}: {actor['relation']}" for actor in structured.get("actors", [])[:4]],
-        [f"{rank['name']} #{index + 1} / {rank['suspicion_score']}" for index, rank in enumerate(structured.get("suspect_rankings", [])[:4])],
-        [f"{step['time_hint']} - {step['event']}" for step in structured.get("reenactment_timeline", [])[:4]],
-        [structured.get("verdict_summary", ""), *structured.get("uncertainties", [])[:2]],
-    ]
-    return [
-        AgentStep(agent_name=name, purpose=loc[key], status="completed", findings=bundles[index], confidence=0.72 + index * 0.04)
-        for index, (name, key) in enumerate(AGENTS)
-    ]
+    return [_run_agent_turn_with_rules(structured, language, spec, []) for spec in AGENTS]
 
 
 def _build_agent_profiles(structured: Dict, language: str) -> List[AgentProfile]:
-    loc = L10N[language]
-    top_clue = structured.get("clues", [{}])[0]
-    top_suspect = structured.get("suspect_rankings", [{}])[0]
-    top_event = structured.get("reenactment_timeline", [{}])[0]
-    presets = [
-        ("Evidence Agent", "Trace Lens", "证据审计" if language == "zh-CN" else "Evidence Audit", "冷静、保守" if language == "zh-CN" else "Calm, conservative", top_clue.get("detail", loc["few_clues"]), [*structured.get("evidence_notes", [])[:2]], "#b44d28"),
-        ("Relationship Agent", "Link Weaver", "关系建模" if language == "zh-CN" else "Relationship Modeling", "结构化、关联优先" if language == "zh-CN" else "Structured, link-first", top_suspect.get("name", loc["core_actor"]), [actor.get("relation", "") for actor in structured.get("actors", [])[:2]], "#254d59"),
-        ("Suspicion Agent", "Rank Signal", "嫌疑排序" if language == "zh-CN" else "Suspicion Ranking", "偏重比较与筛选" if language == "zh-CN" else "Comparative and ranking-oriented", top_suspect.get("motive", top_suspect.get("name", loc["core_actor"])), [item.get("name", "") for item in structured.get("suspect_rankings", [])[:3]], "#8b5e34"),
-        ("Reconstruction Agent", "Time Thread", "因果拼接" if language == "zh-CN" else "Causal Reconstruction", "时序驱动" if language == "zh-CN" else "Timeline-driven", top_event.get("event", loc["few_clues"]), [item.get("event", "") for item in structured.get("reenactment_timeline", [])[:2]], "#3e6b6f"),
-        ("Judge Agent", "Final Frame", "综合裁决" if language == "zh-CN" else "Final Synthesis", "平衡、谨慎" if language == "zh-CN" else "Balanced, cautious", structured.get("verdict_summary", ""), structured.get("uncertainties", [])[:2], "#c59c3d"),
-    ]
-    return [
-        AgentProfile(
-            agent_name=name,
-            codename=codename,
-            role=role,
-            disposition=disposition,
-            current_focus=current_focus,
-            persistent_state=("已收束到当前案件上下文" if language == "zh-CN" else "Bound to the current case context"),
-            memory_notes=[note for note in memory_notes if note],
-            accent=accent,
-        )
-        for name, codename, role, disposition, current_focus, memory_notes, accent in presets
-    ]
+    return [_build_agent_profile_from_spec(spec, structured, language) for spec in AGENTS]
 
 
 def _build_agent_dialogue(structured: Dict, language: str) -> List[AgentExchange]:
-    loc = L10N[language]
-    top_clue = structured.get("clues", [{}])[0]
-    top_suspect = structured.get("suspect_rankings", [{}])[0]
-    top_timeline = structured.get("reenactment_timeline", [{}])[0]
-    lines = [
-        ("Evidence Agent", "Relationship Agent", loc["dialogue_1"].format(label=top_clue.get("label", loc["critical_anomaly"]))),
-        ("Relationship Agent", "Suspicion Agent", loc["dialogue_2"].format(suspect=top_suspect.get("name", loc["core_actor"]))),
-        ("Suspicion Agent", "Reconstruction Agent", loc["dialogue_3"].format(suspect=top_suspect.get("name", loc["core_actor"]))),
-        ("Reconstruction Agent", "Judge Agent", loc["dialogue_4"].format(event=top_timeline.get("event", "early anomaly"))),
-        ("Judge Agent", "All Agents", structured.get("verdict_summary", "")),
-    ]
+    steps = _build_agent_steps(structured, language)
     return [
-        AgentExchange(step_id=f"exchange_{index + 1:02d}", speaker=speaker, audience=audience, message=message, stage="completed")
-        for index, (speaker, audience, message) in enumerate(lines)
+        _build_exchange(step.agent_name, _next_agent_name(step.agent_name), step, structured, language)
+        for step in steps
     ]
 
 
-def _build_final_result(structured: Dict) -> CaseFinalResult:
+def _build_final_result(structured: Dict, agent_steps: Optional[List[AgentStep]] = None) -> CaseFinalResult:
+    agent_steps = agent_steps or []
     return CaseFinalResult(
         case_explanation=structured.get("final_explanation", ""),
         verdict_summary=structured.get("verdict_summary", ""),
@@ -683,9 +871,272 @@ def _build_final_result(structured: Dict) -> CaseFinalResult:
             )
             for item in structured.get("reenactment_timeline", [])[:10]
         ],
-        evidence_notes=structured.get("evidence_notes", []),
+        evidence_notes=[*structured.get("evidence_notes", []), *[f"{step.agent_name}: {' | '.join(step.findings[:2])}" for step in agent_steps[:3]]][:8],
         uncertainties=structured.get("uncertainties", []),
     )
+
+
+def _build_agent_profile_from_spec(spec: Dict, structured: Dict, language: str) -> AgentProfile:
+    loc = L10N[language]
+    top_clue = (structured.get("clues") or [{}])[0]
+    top_suspect = (structured.get("suspect_rankings") or [{}])[0]
+    top_event = (structured.get("reenactment_timeline") or [{}])[0]
+    focus_map = {
+        "Evidence Agent": top_clue.get("detail", loc["few_clues"]),
+        "Relationship Agent": top_suspect.get("name", loc["core_actor"]),
+        "Suspicion Agent": top_suspect.get("motive", top_suspect.get("name", loc["core_actor"])),
+        "Reconstruction Agent": top_event.get("event", loc["few_clues"]),
+        "Judge Agent": structured.get("verdict_summary", loc["few_clues"]),
+    }
+    memory_map = {
+        "Evidence Agent": structured.get("evidence_notes", [])[:2],
+        "Relationship Agent": [actor.get("relation", "") for actor in structured.get("actors", [])[:2]],
+        "Suspicion Agent": [item.get("name", "") for item in structured.get("suspect_rankings", [])[:3]],
+        "Reconstruction Agent": [item.get("event", "") for item in structured.get("reenactment_timeline", [])[:2]],
+        "Judge Agent": structured.get("uncertainties", [])[:2],
+    }
+    return AgentProfile(
+        agent_name=spec["agent_name"],
+        codename=spec["codename"],
+        role=spec["role"][language],
+        disposition=spec["disposition"][language],
+        current_focus=focus_map.get(spec["agent_name"], loc["few_clues"]),
+        persistent_state=loc["agent_context"],
+        memory_notes=[note for note in memory_map.get(spec["agent_name"], []) if note],
+        accent=spec["accent"],
+    )
+
+
+def _run_agent_turn_with_rules(structured: Dict, language: str, spec: Dict, prior_steps: List[AgentStep]) -> AgentStep:
+    loc = L10N[language]
+    bundle_map = {
+        "Evidence Agent": structured.get("evidence_notes", [])[:4],
+        "Relationship Agent": [f"{actor['name']}: {actor['relation']}" for actor in structured.get("actors", [])[:4]],
+        "Suspicion Agent": [f"{rank['name']} #{index + 1} / {rank['suspicion_score']}" for index, rank in enumerate(structured.get("suspect_rankings", [])[:4])],
+        "Reconstruction Agent": [f"{step['time_hint']} - {step['event']}" for step in structured.get("reenactment_timeline", [])[:4]],
+        "Judge Agent": [structured.get("verdict_summary", ""), *structured.get("uncertainties", [])[:2]],
+    }
+    findings = bundle_map.get(spec["agent_name"], [])[:4]
+    if prior_steps:
+        findings = [*findings, f"Prior agents: {', '.join(step.agent_name for step in prior_steps)}"][:5]
+    return AgentStep(
+        agent_name=spec["agent_name"],
+        purpose=loc[spec["purpose_key"]],
+        status="completed",
+        findings=findings,
+        confidence=min(0.72 + len(prior_steps) * 0.04, 0.94),
+    )
+
+
+def _run_agent_turn_with_llm(
+    llm_client: OpenAICompatibleClient,
+    structured_case: Dict,
+    expected_outcome: str,
+    detected_language: str,
+    document: UploadedDocument,
+    spec: Dict,
+    prior_steps: List[AgentStep],
+) -> Optional[AgentStep]:
+    system_prompt, user_prompt = _build_agent_turn_prompts(
+        structured_case, expected_outcome, detected_language, document, spec, prior_steps
+    )
+    payload = llm_client.complete_json(system_prompt, user_prompt, timeout=45)
+    if not payload or not isinstance(payload.get("findings"), list):
+        return None
+    try:
+        confidence = float(payload.get("confidence", 0.75))
+    except (TypeError, ValueError):
+        confidence = 0.75
+    return AgentStep(
+        agent_name=spec["agent_name"],
+        purpose=L10N[detected_language][spec["purpose_key"]],
+        status="completed",
+        findings=[str(item).strip() for item in payload.get("findings", []) if str(item).strip()][:5],
+        confidence=max(0.0, min(confidence, 0.99)),
+    )
+
+
+def _build_agent_turn_prompts(
+    structured_case: Dict,
+    expected_outcome: str,
+    detected_language: str,
+    document: UploadedDocument,
+    spec: Dict,
+    prior_steps: List[AgentStep],
+) -> Tuple[str, str]:
+    target_language = "Simplified Chinese" if detected_language == "zh-CN" else "English"
+    prior_summary = "\n".join(f"- {step.agent_name}: {' | '.join(step.findings[:3])}" for step in prior_steps) or "- None yet."
+    actor_block = "\n".join(
+        f"- {item.get('name')}: role={item.get('role')}; refs={', '.join(item.get('evidence_refs', []))}"
+        for item in structured_case.get("actors", [])[:8]
+    ) or "- None."
+    clue_block = "\n".join(
+        f"- {item.get('id')}: {item.get('label')} / refs={', '.join(item.get('evidence_refs', []))}"
+        for item in structured_case.get("clues", [])[:10]
+    ) or "- None."
+    timeline_block = "\n".join(
+        f"- {item.get('order')}. {item.get('time_hint')} -> {item.get('event')} / refs={', '.join(item.get('evidence_refs', []))}"
+        for item in structured_case.get("reenactment_timeline", [])[:8]
+    ) or "- None."
+    system_prompt = f"""
+You are one specialist analyst inside Salmon.
+Return one valid JSON object and nothing else.
+All natural-language values must be written in {target_language}.
+Keep the JSON keys in English.
+Stay evidence-constrained and reusable across future cases.
+
+Output schema:
+findings: [string]
+confidence: number
+""".strip()
+    user_prompt = f"""
+Task:
+{expected_outcome}
+
+Document:
+- source_name: {document.source_name}
+- source_type: {document.source_type}
+
+Current specialist:
+- agent_name: {spec['agent_name']}
+- role: {spec['role'][detected_language]}
+- purpose: {L10N[detected_language][spec['purpose_key']]}
+
+Actors:
+{actor_block}
+
+Clues:
+{clue_block}
+
+Timeline:
+{timeline_block}
+
+Prior agent outputs:
+{prior_summary}
+
+Constraints:
+- Produce 3 to 5 findings.
+- Mention relevant reference ids directly inside the findings when possible.
+- Keep the style reusable; do not assume facts outside the material.
+""".strip()
+    return system_prompt, user_prompt
+
+
+def _run_final_synthesis_with_llm(
+    llm_client: OpenAICompatibleClient,
+    structured_case: Dict,
+    expected_outcome: str,
+    detected_language: str,
+    document: UploadedDocument,
+    agent_steps: List[AgentStep],
+) -> Optional[CaseFinalResult]:
+    system_prompt, user_prompt = _build_final_synthesis_prompts(
+        structured_case, expected_outcome, detected_language, document, agent_steps
+    )
+    payload = llm_client.complete_json(system_prompt, user_prompt, timeout=45)
+    if not payload:
+        return None
+    required = ["case_explanation", "verdict_summary", "suspect_rankings", "reenactment_timeline", "evidence_notes", "uncertainties"]
+    if any(key not in payload for key in required):
+        return None
+    normalized = _normalize_llm_payload(
+        {
+            "actors": structured_case.get("actors", []),
+            "events": structured_case.get("events", []),
+            "clues": structured_case.get("clues", []),
+            **payload,
+        }
+    )
+    return _build_final_result(normalized, agent_steps)
+
+
+def _build_final_synthesis_prompts(
+    structured_case: Dict,
+    expected_outcome: str,
+    detected_language: str,
+    document: UploadedDocument,
+    agent_steps: List[AgentStep],
+) -> Tuple[str, str]:
+    target_language = "Simplified Chinese" if detected_language == "zh-CN" else "English"
+    agent_block = "\n".join(f"- {step.agent_name}: {' | '.join(step.findings[:4])}" for step in agent_steps) or "- None."
+    ranking_block = "\n".join(
+        f"- {item.get('name')}: score={item.get('suspicion_score')} role={item.get('role')}"
+        for item in structured_case.get("suspect_rankings", [])[:5]
+    ) or "- None."
+    timeline_block = "\n".join(
+        f"- {item.get('order')}. {item.get('time_hint')} -> {item.get('event')} / refs={', '.join(item.get('evidence_refs', []))}"
+        for item in structured_case.get("reenactment_timeline", [])[:10]
+    ) or "- None."
+    system_prompt = f"""
+You are Salmon's final synthesis agent.
+Return one valid JSON object and nothing else.
+All natural-language values must be written in {target_language}.
+Keep the JSON keys in English.
+Stay evidence-constrained and preserve uncertainty.
+""".strip()
+    user_prompt = f"""
+Task:
+{expected_outcome}
+
+Document:
+- source_name: {document.source_name}
+- source_type: {document.source_type}
+
+Candidate ranking:
+{ranking_block}
+
+Working timeline:
+{timeline_block}
+
+Agent outputs:
+{agent_block}
+
+Output schema reminder:
+- case_explanation
+- verdict_summary
+- suspect_rankings
+- reenactment_timeline
+- evidence_notes
+- uncertainties
+""".strip()
+    return system_prompt, user_prompt
+
+
+def _build_exchange(agent_name: str, audience: str, step: AgentStep, structured: Dict, language: str) -> AgentExchange:
+    loc = L10N[language]
+    top_clue = (structured.get("clues") or [{}])[0]
+    top_suspect = (structured.get("suspect_rankings") or [{}])[0]
+    top_timeline = (structured.get("reenactment_timeline") or [{}])[0]
+    fallback = {
+        "Evidence Agent": loc["dialogue_1"].format(label=top_clue.get("label", loc["critical_anomaly"])),
+        "Relationship Agent": loc["dialogue_2"].format(suspect=top_suspect.get("name", loc["core_actor"])),
+        "Suspicion Agent": loc["dialogue_3"].format(suspect=top_suspect.get("name", loc["core_actor"])),
+        "Reconstruction Agent": loc["dialogue_4"].format(event=top_timeline.get("event", "early anomaly")),
+        "Judge Agent": loc["dialogue_5"],
+    }
+    return AgentExchange(
+        step_id=f"exchange_{re.sub(r'[^a-z0-9]+', '_', agent_name.lower()).strip('_')}",
+        speaker=agent_name,
+        audience=audience,
+        message=step.findings[0] if step.findings else fallback.get(agent_name, loc["few_clues"]),
+        stage="completed",
+    )
+
+
+def _agent_spec(agent_name: str) -> Dict:
+    for spec in AGENTS:
+        if spec["agent_name"] == agent_name:
+            return spec
+    return AGENTS[0]
+
+
+def _next_agent_name(agent_name: str) -> str:
+    names = [item["agent_name"] for item in AGENTS]
+    try:
+        index = names.index(agent_name)
+    except ValueError:
+        return "All Agents"
+    return names[index + 1] if index + 1 < len(names) else "All Agents"
 
 
 def _split_line(line: str, unknown_time: str) -> Tuple[str, str]:
@@ -716,14 +1167,14 @@ def _risk_score(detail: str) -> int:
 
 def _clue_label(detail: str, language: str) -> str:
     lowered = detail.lower()
-    if any(word in detail for word in ZH_KEYWORDS["camera"]) or "camera" in lowered:
+    if any(word in detail or word in lowered for word in ("监控", "盲区", "录像", "camera", "surveillance", "footage")):
         return "\u76d1\u63a7\u5f02\u5e38" if language == "zh-CN" else "Surveillance anomaly"
-    if any(word in detail for word in ZH_KEYWORDS["record"]) or "missing" in lowered:
+    if any(word in detail or word in lowered for word in ("缺失", "封存", "篡改", "missing", "tamper", "record")):
         return "\u8bb0\u5f55\u5f02\u5e38" if language == "zh-CN" else "Record anomaly"
-    if any(word in detail for word in ZH_KEYWORDS["mechanism"]) or any(
-        word in lowered for word in ("locked room", "ventilator", "bell rope", "whistle", "speckled band")
-    ):
-        return "\u4f5c\u6848\u673a\u5236\u7ebf\u7d22" if language == "zh-CN" else "Mechanism clue"
+    if any(word in detail or word in lowered for word in ("装置", "通道", "设备", "机制", "device", "access", "mechanism")):
+        return "\u673a\u5236\u7ebf\u7d22" if language == "zh-CN" else "Mechanism clue"
+    if any(word in detail or word in lowered for word in ("保险", "财产", "债务", "insurance", "property", "debt")):
+        return "\u5229\u76ca\u7ebf\u7d22" if language == "zh-CN" else "Incentive clue"
     return L10N[language]["critical_anomaly"]
 
 
