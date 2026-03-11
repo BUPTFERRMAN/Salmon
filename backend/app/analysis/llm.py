@@ -108,7 +108,7 @@ class OpenAICompatibleClient:
             and self.config.model.strip()
         )
 
-    def complete_json(self, system_prompt: str, user_prompt: str, timeout: int = 90) -> Optional[Dict[str, Any]]:
+    def complete_json(self, system_prompt: str, user_prompt: str, timeout: int = 60) -> Optional[Dict[str, Any]]:
         if not self.enabled:
             return None
 
