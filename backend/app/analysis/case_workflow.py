@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple
 from app.analysis.llm import OpenAICompatibleClient
 from app.schemas import (
     AgentExchange,
+    AgentProfile,
     AgentStep,
     CaseFinalResult,
     CaseParseResponse,
@@ -137,6 +138,7 @@ def run_case_workflow(text: str, document: UploadedDocument, expected_outcome: O
         graph_edges=parse_stage.graph_edges,
         evidence_items=parse_stage.evidence_items,
         pipeline=reason_stage.pipeline,
+        agent_profiles=reason_stage.agent_profiles,
         agents=reason_stage.agents,
         agent_dialogue=reason_stage.agent_dialogue,
         final_result=reason_stage.final_result,
@@ -179,6 +181,7 @@ def reason_case_material(text: str, document: UploadedDocument, expected_outcome
         detected_language=language,
         model_status=model_status,
         pipeline=_pipeline("completed" if model_status == "model_plus_rules" else "fallback"),
+        agent_profiles=_build_agent_profiles(structured, language),
         agents=_build_agent_steps(structured, language),
         agent_dialogue=_build_agent_dialogue(structured, language),
         final_result=_build_final_result(structured),
@@ -486,6 +489,10 @@ def _build_graph(structured: Dict) -> Tuple[List[GraphNode], List[GraphEdge]]:
     nodes: List[GraphNode] = []
     edges: List[GraphEdge] = []
     actor_ids: Dict[str, str] = {}
+    required_event_ids = set()
+
+    for clue in structured.get("clues", [])[:10]:
+        required_event_ids.update(clue.get("event_ids", []))
 
     for actor in structured.get("actors", [])[:8]:
         node_id = _node_id("actor", actor["name"])
@@ -507,7 +514,15 @@ def _build_graph(structured: Dict) -> Tuple[List[GraphNode], List[GraphEdge]]:
             )
         )
 
-    for event in structured.get("events", [])[:12]:
+    event_items = structured.get("events", [])
+    selected_events = []
+    for event in event_items:
+        if len(selected_events) < 12 or event["id"] in required_event_ids:
+            selected_events.append(event)
+
+    event_ids = set()
+    for event in selected_events:
+        event_ids.add(event["id"])
         nodes.append(
             GraphNode(
                 node_id=event["id"],
@@ -544,7 +559,8 @@ def _build_graph(structured: Dict) -> Tuple[List[GraphNode], List[GraphEdge]]:
             )
         )
         for event_id in clue.get("event_ids", []):
-            edges.append(GraphEdge(source=event_id, target=clue["id"], relation="produces_clue", evidence=clue["detail"], strength=0.87))
+            if event_id in event_ids:
+                edges.append(GraphEdge(source=event_id, target=clue["id"], relation="produces_clue", evidence=clue["detail"], strength=0.87))
         for actor_name in clue.get("actors", []):
             if actor_name in actor_ids:
                 edges.append(GraphEdge(source=actor_ids[actor_name], target=clue["id"], relation="linked_to", evidence=clue["detail"], strength=0.74))
@@ -591,6 +607,33 @@ def _build_agent_steps(structured: Dict, language: str) -> List[AgentStep]:
     return [
         AgentStep(agent_name=name, purpose=loc[key], status="completed", findings=bundles[index], confidence=0.72 + index * 0.04)
         for index, (name, key) in enumerate(AGENTS)
+    ]
+
+
+def _build_agent_profiles(structured: Dict, language: str) -> List[AgentProfile]:
+    loc = L10N[language]
+    top_clue = structured.get("clues", [{}])[0]
+    top_suspect = structured.get("suspect_rankings", [{}])[0]
+    top_event = structured.get("reenactment_timeline", [{}])[0]
+    presets = [
+        ("Evidence Agent", "Trace Lens", "证据审计" if language == "zh-CN" else "Evidence Audit", "冷静、保守" if language == "zh-CN" else "Calm, conservative", top_clue.get("detail", loc["few_clues"]), [*structured.get("evidence_notes", [])[:2]], "#b44d28"),
+        ("Relationship Agent", "Link Weaver", "关系建模" if language == "zh-CN" else "Relationship Modeling", "结构化、关联优先" if language == "zh-CN" else "Structured, link-first", top_suspect.get("name", loc["core_actor"]), [actor.get("relation", "") for actor in structured.get("actors", [])[:2]], "#254d59"),
+        ("Suspicion Agent", "Rank Signal", "嫌疑排序" if language == "zh-CN" else "Suspicion Ranking", "偏重比较与筛选" if language == "zh-CN" else "Comparative and ranking-oriented", top_suspect.get("motive", top_suspect.get("name", loc["core_actor"])), [item.get("name", "") for item in structured.get("suspect_rankings", [])[:3]], "#8b5e34"),
+        ("Reconstruction Agent", "Time Thread", "因果拼接" if language == "zh-CN" else "Causal Reconstruction", "时序驱动" if language == "zh-CN" else "Timeline-driven", top_event.get("event", loc["few_clues"]), [item.get("event", "") for item in structured.get("reenactment_timeline", [])[:2]], "#3e6b6f"),
+        ("Judge Agent", "Final Frame", "综合裁决" if language == "zh-CN" else "Final Synthesis", "平衡、谨慎" if language == "zh-CN" else "Balanced, cautious", structured.get("verdict_summary", ""), structured.get("uncertainties", [])[:2], "#c59c3d"),
+    ]
+    return [
+        AgentProfile(
+            agent_name=name,
+            codename=codename,
+            role=role,
+            disposition=disposition,
+            current_focus=current_focus,
+            persistent_state=("已收束到当前案件上下文" if language == "zh-CN" else "Bound to the current case context"),
+            memory_notes=[note for note in memory_notes if note],
+            accent=accent,
+        )
+        for name, codename, role, disposition, current_focus, memory_notes, accent in presets
     ]
 
 

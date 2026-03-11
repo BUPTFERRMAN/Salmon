@@ -156,6 +156,17 @@ class AgentStep(BaseModel):
     confidence: float
 
 
+class AgentProfile(BaseModel):
+    agent_name: str
+    codename: str
+    role: str
+    disposition: str
+    current_focus: str
+    persistent_state: str
+    memory_notes: List[str]
+    accent: str
+
+
 class AgentExchange(BaseModel):
     step_id: str
     speaker: str
@@ -224,6 +235,7 @@ class CaseReasonResponse(BaseModel):
     detected_language: str
     model_status: str
     pipeline: List[PipelineStep]
+    agent_profiles: List[AgentProfile]
     agents: List[AgentStep]
     agent_dialogue: List[AgentExchange]
     final_result: CaseFinalResult
@@ -239,6 +251,7 @@ class CaseWorkflowResponse(BaseModel):
     graph_edges: List[GraphEdge]
     evidence_items: List[EvidenceItem]
     pipeline: List[PipelineStep]
+    agent_profiles: List[AgentProfile]
     agents: List[AgentStep]
     agent_dialogue: List[AgentExchange]
     final_result: CaseFinalResult

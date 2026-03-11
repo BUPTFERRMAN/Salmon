@@ -20,49 +20,6 @@ const els = {
   resultRoot: document.getElementById("resultRoot"),
 };
 
-const AGENT_PERSONAS = [
-  {
-    agent_name: "Evidence Agent",
-    codename: "Trace Lens",
-    badge: "EV",
-    accent: "#b44d28",
-    role: "证据审计",
-    summary: "负责提取高风险线索、识别证据断点与异常模式。",
-  },
-  {
-    agent_name: "Relationship Agent",
-    codename: "Link Weaver",
-    badge: "RL",
-    accent: "#254d59",
-    role: "关系建模",
-    summary: "负责梳理人物关系、利益链条与隐性依附结构。",
-  },
-  {
-    agent_name: "Suspicion Agent",
-    codename: "Rank Signal",
-    badge: "SP",
-    accent: "#8b5e34",
-    role: "嫌疑排序",
-    summary: "基于动机、手段、机会与线索覆盖度输出排序。",
-  },
-  {
-    agent_name: "Reconstruction Agent",
-    codename: "Time Thread",
-    badge: "RC",
-    accent: "#3e6b6f",
-    role: "因果拼接",
-    summary: "负责回溯作案机制、重组事件链条与时间线。",
-  },
-  {
-    agent_name: "Judge Agent",
-    codename: "Final Frame",
-    badge: "JG",
-    accent: "#c59c3d",
-    role: "综合裁决",
-    summary: "负责整合多方观点，输出主解释与关键不确定性。",
-  },
-];
-
 const STEP_LABELS = {
   parse: { title: "材料解析", detail: "抽取可分析文本、基础事实与结构化片段。" },
   graph: { title: "关系图谱", detail: "构建人物、事件与线索的可交互关系视图。" },
@@ -90,7 +47,6 @@ function resetWorkspace() {
     graphInstance._destructor();
   }
   graphInstance = null;
-
   els.pipelineRoot.className = "pipeline empty";
   els.pipelineRoot.textContent = "任务启动后，这里会依次展示解析、图谱、智能体与结果阶段。";
   els.documentRoot.className = "document empty";
@@ -100,22 +56,18 @@ function resetWorkspace() {
   els.graphInspector.className = "inspector empty";
   els.graphInspector.textContent = "点击节点或关系后，这里将显示详细属性与证据说明。";
   els.agentRoot.className = "grid-two empty";
-  els.agentRoot.textContent = "智能体角色将在这里初始化。";
+  els.agentRoot.textContent = "持续状态代理将在这里初始化。";
   els.agentDialogue.className = "dialogue-feed empty";
-  els.agentDialogue.textContent = "智能体交互日志将在这里动态播放。";
+  els.agentDialogue.textContent = "代理协作日志将在这里动态播放。";
   els.resultRoot.className = "result-grid empty";
   els.resultRoot.textContent = "最终分析结果将在这里生成。";
-}
-
-function localizeStep(step) {
-  return STEP_LABELS[step.step_id] || { title: step.title, detail: step.detail };
 }
 
 function renderPipeline(steps) {
   els.pipelineRoot.className = "pipeline";
   els.pipelineRoot.innerHTML = steps
     .map((step) => {
-      const copy = localizeStep(step);
+      const copy = STEP_LABELS[step.step_id] || { title: step.title, detail: step.detail };
       return `
         <article class="pipeline-step ${step.status}">
           <strong>${copy.title}</strong>
@@ -142,12 +94,7 @@ function renderDocument(document, evidenceItems, expectedOutcome) {
     </article>
     <article class="result-card">
       <strong>关键线索预览</strong>
-      <ul>
-        ${evidenceItems
-          .slice(0, 5)
-          .map((item) => `<li>${item.label}（风险 ${item.risk_score}）: ${item.detail}</li>`)
-          .join("")}
-      </ul>
+      <ul>${evidenceItems.slice(0, 5).map((item) => `<li>${item.label}（风险 ${item.risk_score}）: ${item.detail}</li>`).join("")}</ul>
     </article>
   `;
 }
@@ -178,9 +125,7 @@ function renderInspector(kind, payload) {
       <h3>${payload.relation}</h3>
       <p class="muted">${payload.source} -> ${payload.target}</p>
       <p>${payload.evidence || "暂无说明。"}</p>
-      <dl>
-        <div><dt>strength</dt><dd>${payload.strength}</dd></div>
-      </dl>
+      <dl><div><dt>strength</dt><dd>${payload.strength}</dd></div></dl>
     </article>
   `;
 }
@@ -189,6 +134,18 @@ function nodeColor(node) {
   if (node.node_type === "actor") return "#b44d28";
   if (node.node_type === "event") return "#254d59";
   return "#c59c3d";
+}
+
+function normalizeGraph(nodes, edges) {
+  const normalizedNodes = nodes.map((node) => ({
+    ...node,
+    id: node.node_id,
+    color: nodeColor(node),
+    val: Math.max(6, (Number(node.suspicion_score) || 18) / 7),
+  }));
+  const ids = new Set(normalizedNodes.map((node) => node.id));
+  const normalizedLinks = edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target));
+  return { nodes: normalizedNodes, links: normalizedLinks };
 }
 
 function renderGraph(nodes, edges) {
@@ -209,91 +166,77 @@ function renderGraph(nodes, edges) {
     return;
   }
 
-  if (graphInstance && typeof graphInstance._destructor === "function") {
-    graphInstance._destructor();
+  const graphData = normalizeGraph(nodes, edges);
+  if (!graphData.nodes.length) {
+    els.graphCanvas.classList.add("empty");
+    els.graphCanvas.textContent = "图谱节点数据为空。";
+    return;
   }
 
-  const width = Math.max(420, els.graphCanvas.clientWidth - 24);
-  const height = Math.max(440, els.graphCanvas.clientHeight - 24);
-
-  const data = {
-    nodes: nodes.map((node) => ({
-      ...node,
-      id: node.node_id,
-      color: nodeColor(node),
-      val: Math.max(6, (Number(node.suspicion_score) || 20) / 8),
-    })),
-    links: edges.map((edge) => ({ ...edge })),
-  };
+  const width = Math.max(480, els.graphCanvas.clientWidth - 24);
+  const height = Math.max(500, els.graphCanvas.clientHeight - 24);
 
   graphInstance = ForceGraph3D()(els.graphCanvas)
     .width(width)
     .height(height)
-    .backgroundColor("rgba(255,255,255,0)")
     .nodeId("id")
     .linkSource("source")
     .linkTarget("target")
     .showNavInfo(false)
-    .nodeLabel((node) => `${node.label}<br/>${node.node_type}`)
+    .backgroundColor("rgba(255,255,255,0)")
     .nodeColor((node) => node.color)
     .nodeVal((node) => node.val)
-    .nodeOpacity(0.92)
-    .linkColor(() => "rgba(29,26,24,0.22)")
+    .nodeLabel((node) => `${node.label}<br/>${node.node_type}`)
+    .linkColor(() => "rgba(29,26,24,0.2)")
     .linkWidth((link) => 1.5 + Number(link.strength || 0.5))
     .linkOpacity(0.72)
     .linkDirectionalParticles(1)
-    .linkDirectionalParticleWidth(1.8)
-    .cooldownTicks(160)
-    .graphData(data)
+    .linkDirectionalParticleWidth(2)
+    .d3AlphaDecay(0.02)
+    .cooldownTicks(180)
+    .graphData(graphData)
     .onNodeClick((node) => renderInspector("node", node))
     .onLinkClick((link) => renderInspector("link", link))
-    .onEngineStop(() => {
-      if (graphInstance) {
-        graphInstance.zoomToFit(400, 70);
-      }
-    });
+    .onEngineStop(() => graphInstance && graphInstance.zoomToFit(500, 60));
 }
 
-function renderAgentPersonas(mode = "idle", agents = []) {
-  const findingsByName = new Map(agents.map((agent) => [agent.agent_name, agent]));
+function renderAgentProfiles(profiles = []) {
   els.agentRoot.className = "grid-two";
-  els.agentRoot.innerHTML = AGENT_PERSONAS.map((persona) => {
-    const result = findingsByName.get(persona.agent_name);
-    const statusLabel = mode === "pending" ? "待机完成，等待推演" : result ? "已完成本轮分析" : "角色初始化";
-    const list = result
-      ? `<ul>${result.findings.map((item) => `<li>${item}</li>`).join("")}</ul>`
-      : `<p class="muted">${persona.summary}</p>`;
-    return `
-      <article class="agent-card persona-card ${result ? "active" : ""}" style="--agent-accent:${persona.accent}">
-        <div class="persona-head">
-          <div class="persona-badge">${persona.badge}</div>
-          <div>
-            <strong>${persona.codename}</strong>
-            <div class="muted">${persona.agent_name} / ${persona.role}</div>
+  els.agentRoot.innerHTML = profiles
+    .map(
+      (profile) => `
+        <article class="agent-card persona-card" style="--agent-accent:${profile.accent}">
+          <div class="persona-head">
+            <div class="persona-badge">${profile.codename.slice(0, 2).toUpperCase()}</div>
+            <div>
+              <strong>${profile.codename}</strong>
+              <div class="muted">${profile.agent_name} / ${profile.role}</div>
+            </div>
           </div>
-        </div>
-        <p class="persona-summary">${persona.summary}</p>
-        <div class="persona-state">${statusLabel}</div>
-        ${list}
-      </article>
-    `;
-  }).join("");
+          <p class="persona-summary">${profile.current_focus}</p>
+          <div class="persona-state">${profile.disposition}</div>
+          <p class="muted">${profile.persistent_state}</p>
+          <ul>${(profile.memory_notes || []).map((item) => `<li>${item}</li>`).join("")}</ul>
+        </article>
+      `
+    )
+    .join("");
 }
 
-async function playDialogue(dialogue) {
+async function playDialogue(dialogue = []) {
   els.agentDialogue.className = "dialogue-feed";
   els.agentDialogue.innerHTML = "";
   for (const item of dialogue) {
-    const wrapper = document.createElement("article");
-    wrapper.className = "dialogue-item";
-    wrapper.innerHTML = `
+    const node = document.createElement("article");
+    node.className = "dialogue-item";
+    node.innerHTML = `
       <div class="dialogue-head">
         <span>${item.speaker}</span>
         <span>${item.audience}</span>
       </div>
       <p>${item.message}</p>
     `;
-    els.agentDialogue.appendChild(wrapper);
+    els.agentDialogue.appendChild(node);
     await new Promise((resolve) => setTimeout(resolve, 280));
   }
 }
@@ -377,9 +320,7 @@ async function saveConfig() {
     body: JSON.stringify(payload),
   });
   els.apiKey.value = "";
-  els.configState.textContent = payload.enabled
-    ? "模型配置已保存，后续任务将优先调用外部模型。"
-    : "模型配置已保存，当前处于关闭状态。";
+  els.configState.textContent = payload.enabled ? "模型配置已保存，后续任务将优先调用外部模型。" : "模型配置已保存，当前处于关闭状态。";
 }
 
 async function loadSample() {
@@ -391,28 +332,19 @@ async function loadSample() {
 
 async function runWorkflow() {
   resetWorkspace();
-  renderAgentPersonas("pending");
   setStatus("材料解析中");
   els.modelBadge.textContent = "parsing";
-
   const formData = new FormData();
   formData.append("expected_outcome", els.expectedOutcome.value.trim() || "请重建这起案件的形成链条。");
   formData.append("raw_text", els.rawText.value.trim());
   const file = els.fileInput.files[0];
-  if (file) {
-    formData.append("file", file);
-  }
+  if (file) formData.append("file", file);
 
   try {
-    const parseData = await fetchJson("/api/case-parse", {
-      method: "POST",
-      body: formData,
-    });
-
+    const parseData = await fetchJson("/api/case-parse", { method: "POST", body: formData });
     renderPipeline(parseData.pipeline);
     renderDocument(parseData.document, parseData.evidence_items, parseData.expected_outcome);
     renderGraph(parseData.graph_nodes, parseData.graph_edges);
-    renderAgentPersonas("pending");
     setStatus("关系图谱已完成，正在执行多智能体推演");
     els.modelBadge.textContent = "reasoning";
 
@@ -426,11 +358,11 @@ async function runWorkflow() {
       }),
     });
 
-    els.modelBadge.textContent = reasonData.model_status;
     renderPipeline(reasonData.pipeline);
-    renderAgentPersonas("done", reasonData.agents);
+    renderAgentProfiles(reasonData.agent_profiles || []);
     renderResults(reasonData.final_result);
-    setStatus("多智能体交互回放中");
+    els.modelBadge.textContent = reasonData.model_status;
+    setStatus("代理协作日志回放中");
     await playDialogue(reasonData.agent_dialogue || []);
     setStatus("分析完成");
   } catch (error) {
@@ -442,11 +374,8 @@ async function runWorkflow() {
 
 async function bootstrap() {
   const design = await fetchJson("/api/design");
-  els.designNotes.innerHTML = [...design.borrowed_from_mirofish, ...design.rewritten_for_backtrace]
-    .map((item) => `<li>${item}</li>`)
-    .join("");
+  els.designNotes.innerHTML = [...design.borrowed_from_mirofish, ...design.rewritten_for_backtrace].map((item) => `<li>${item}</li>`).join("");
   await loadConfig();
-  renderAgentPersonas("idle");
 }
 
 document.getElementById("saveConfig").addEventListener("click", saveConfig);
