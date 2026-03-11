@@ -20,25 +20,42 @@ const els = {
   resultRoot: document.getElementById("resultRoot"),
 };
 
-const STEP_LABELS = {
-  parse: { title: "材料解析", detail: "抽取原始文本、观察点与结构化片段。" },
-  graph: { title: "关系图谱", detail: "构建人物、事件、线索之间的可交互关系网络。" },
-  reason: { title: "多智能体协作", detail: "按轮次执行代理推演，展示交叉验证与回合日志。" },
-  result: { title: "综合输出", detail: "基于代理协作结果生成案情解释、排序与重演时间线。" },
+const COPY = {
+  pipeline: {
+    parse: { title: "材料解析", detail: "抽取原始文本、结构化片段与初步证据引用。" },
+    graph: { title: "关系图谱", detail: "构建人物、事件、线索及其关联关系。" },
+    reason: { title: "多智能体协作", detail: "按轮次执行代理推演，逐步展示交叉校验过程。" },
+    result: { title: "综合输出", detail: "整合代理结论，形成最终解释、排序与回溯时间线。" },
+  },
+  collaborationPlan: [
+    {
+      roundIndex: 1,
+      label: "Round 1 · 初步建模",
+      agents: ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent"],
+    },
+    {
+      roundIndex: 2,
+      label: "Round 2 · 交叉校验",
+      agents: ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent", "Judge Agent"],
+    },
+  ],
+  empty: {
+    pipeline: "任务启动后，这里会依次展示解析、图谱、代理协作与综合输出。",
+    document: "尚未载入材料。",
+    graph: "图谱尚未生成。",
+    agents: "图谱构建完成后将初始化代理角色。",
+    dialogue: "多轮代理日志会逐步出现在这里。",
+    results: "最终分析结果将在这里生成。",
+  },
+  graph: {
+    defaultInspectorTitle: "图谱检查器",
+    defaultInspectorBody: "点击节点、关系或证据引用后，这里会展示结构属性、证据摘录和关联对象。点击图谱空白处可恢复到初始高亮状态。",
+    noEvidence: "暂无细粒度证据引用。",
+    noRelatedNodes: "暂无关联节点。",
+    noHitNodes: "没有直接命中的节点。",
+    noHitLinks: "没有直接命中的关系。",
+  },
 };
-
-const COLLABORATION_PLAN = [
-  {
-    roundIndex: 1,
-    label: "Round 1 · 初步建模",
-    agents: ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent"],
-  },
-  {
-    roundIndex: 2,
-    label: "Round 2 · 交叉校验",
-    agents: ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent", "Judge Agent"],
-  },
-];
 
 const state = {
   graphInstance: null,
@@ -77,6 +94,28 @@ function setStatus(text) {
   els.statusText.textContent = text;
 }
 
+function renderGraphInspectorDefault() {
+  els.graphInspector.className = "inspector";
+  els.graphInspector.innerHTML = `
+    <article class="inspector-card">
+      <h3>${COPY.graph.defaultInspectorTitle}</h3>
+      <p>${COPY.graph.defaultInspectorBody}</p>
+      <div class="chips">
+        <span class="pill">节点 ${state.graphData.nodes.length}</span>
+        <span class="pill">关系 ${state.graphData.links.length}</span>
+      </div>
+    </article>
+  `;
+}
+
+function clearGraphSelection() {
+  state.selectedNodeId = null;
+  state.selectedLinkKey = null;
+  state.selectedEvidenceRef = null;
+  renderGraphInspectorDefault();
+  applyGraphHighlight();
+}
+
 function resetWorkspace() {
   if (state.graphInstance && typeof state.graphInstance._destructor === "function") {
     state.graphInstance._destructor();
@@ -91,31 +130,31 @@ function resetWorkspace() {
   state.selectedEvidenceRef = null;
 
   els.pipelineRoot.className = "pipeline empty";
-  els.pipelineRoot.textContent = "任务启动后，这里会依次展示解析、图谱、代理协作与综合结果。";
+  els.pipelineRoot.textContent = COPY.empty.pipeline;
   els.documentRoot.className = "document empty";
-  els.documentRoot.textContent = "尚未载入材料。";
+  els.documentRoot.textContent = COPY.empty.document;
   els.graphCanvas.className = "graph-shell empty";
-  els.graphCanvas.textContent = "图谱尚未生成。";
+  els.graphCanvas.textContent = COPY.empty.graph;
   els.graphInspector.className = "inspector empty";
-  els.graphInspector.textContent = "点击节点、关系或证据引用后，这里会显示证据说明与关联结构。";
+  els.graphInspector.textContent = COPY.graph.defaultInspectorBody;
   els.agentRoot.className = "grid-two empty";
-  els.agentRoot.textContent = "代理将在图谱构建完成后初始化。";
+  els.agentRoot.textContent = COPY.empty.agents;
   els.agentDialogue.className = "dialogue-feed empty";
-  els.agentDialogue.textContent = "多轮代理交互日志会逐步出现在这里。";
+  els.agentDialogue.textContent = COPY.empty.dialogue;
   els.resultRoot.className = "result-grid empty";
-  els.resultRoot.textContent = "最终分析结果将在这里生成。";
+  els.resultRoot.textContent = COPY.empty.results;
 }
 
 function renderPipeline(steps) {
   els.pipelineRoot.className = "pipeline";
   els.pipelineRoot.innerHTML = steps
     .map((step) => {
-      const copy = STEP_LABELS[step.step_id] || { title: step.title || step.step_id, detail: step.detail || "" };
+      const copy = COPY.pipeline[step.step_id] || { title: step.title || step.step_id, detail: step.detail || "" };
       return `
         <article class="pipeline-step ${step.status}">
-          <strong>${copy.title}</strong>
+          <strong>${escapeHtml(copy.title)}</strong>
           <div class="muted">${escapeHtml(step.status)}</div>
-          <p>${copy.detail}</p>
+          <p>${escapeHtml(copy.detail)}</p>
         </article>
       `;
     })
@@ -139,39 +178,40 @@ function renderDocument(document, evidenceItems, expectedOutcome, fullText) {
       <div class="card-head">
         <strong>${escapeHtml(document.source_name)}</strong>
         <div class="pill-row">
-          <span class="pill">类型: ${escapeHtml(document.source_type)}</span>
-          <span class="pill">字符数: ${document.character_count}</span>
-          <span class="pill">页数: ${document.page_count ?? "未统计"}</span>
+          <span class="pill">类型：${escapeHtml(document.source_type)}</span>
+          <span class="pill">字符数：${escapeHtml(document.character_count)}</span>
+          <span class="pill">页数：${escapeHtml(document.page_count ?? "未统计")}</span>
         </div>
       </div>
       <div class="scroll-pane">
-        <p><strong>分析目标:</strong> ${escapeHtml(expectedOutcome)}</p>
-        <p>${escapeHtml(document.extracted_preview)}</p>
+        <p><strong>分析目标：</strong>${escapeHtml(expectedOutcome)}</p>
+        <p><strong>上传内容摘要：</strong></p>
+        <p>${escapeHtml(document.extracted_preview || "暂无摘要")}</p>
       </div>
     </article>
     <article class="result-card document-card document-wide">
       <div class="card-head">
         <strong>完整材料</strong>
-        <span class="muted">支持滚动查看</span>
+        <span class="muted">滚动查看全文</span>
       </div>
       <pre class="scroll-pane material-text">${materialText}</pre>
     </article>
     <article class="result-card document-card">
       <div class="card-head">
         <strong>关键证据预览</strong>
-        <span class="muted">点击证据可联动图谱</span>
+        <span class="muted">点击后联动图谱高亮</span>
       </div>
       <div class="scroll-pane evidence-list">
         ${evidenceItems
-          .slice(0, 12)
+          .slice(0, 18)
           .map(
             (item) => `
               <button class="evidence-chip" data-ref-id="${escapeHtml(item.evidence_id)}">
                 <strong>${escapeHtml(item.label)}</strong>
-                <span>${escapeHtml(item.evidence_id)} / 风险 ${item.risk_score}</span>
+                <span>${escapeHtml(item.evidence_id)} / 风险 ${escapeHtml(item.risk_score)}</span>
               </button>
               <p class="evidence-excerpt">${escapeHtml(item.detail)}</p>
-            `
+            `,
           )
           .join("")}
       </div>
@@ -245,6 +285,7 @@ function applyGraphHighlight() {
   const { selectedNodeId, selectedLinkKey, selectedEvidenceRef } = state;
   const evidenceContext = selectedEvidenceRef ? collectEvidenceContext(selectedEvidenceRef) : { nodes: [], links: [] };
   const evidenceNodeIds = new Set(evidenceContext.nodes.map((node) => node.id));
+
   for (const link of evidenceContext.links) {
     const source = typeof link.source === "object" ? link.source.id : link.source;
     const target = typeof link.target === "object" ? link.target.id : link.target;
@@ -310,7 +351,7 @@ function applyGraphHighlight() {
 }
 
 function renderEvidenceDetails(details = []) {
-  if (!details.length) return '<p class="muted">暂无细粒度证据引用。</p>';
+  if (!details.length) return `<p class="muted">${COPY.graph.noEvidence}</p>`;
   return `
     <div class="evidence-stack">
       ${details
@@ -321,7 +362,7 @@ function renderEvidenceDetails(details = []) {
               <span>${escapeHtml(detail.note || detail.source)}</span>
             </button>
             <p class="evidence-excerpt">${escapeHtml(detail.excerpt)}</p>
-          `
+          `,
         )
         .join("")}
     </div>
@@ -329,8 +370,10 @@ function renderEvidenceDetails(details = []) {
 }
 
 function renderRelatedNodes(nodeIds = []) {
-  if (!nodeIds.length) return '<p class="muted">暂无关联节点。</p>';
-  return `<div class="chips">${nodeIds.map((nodeId) => `<button class="pill link-pill" data-node-id="${escapeHtml(nodeId)}">${escapeHtml(nodeId)}</button>`).join("")}</div>`;
+  if (!nodeIds.length) return `<p class="muted">${COPY.graph.noRelatedNodes}</p>`;
+  return `<div class="chips">${nodeIds
+    .map((nodeId) => `<button class="pill link-pill" data-node-id="${escapeHtml(nodeId)}">${escapeHtml(nodeId)}</button>`)
+    .join("")}</div>`;
 }
 
 function renderEvidenceInspector(refId) {
@@ -339,38 +382,42 @@ function renderEvidenceInspector(refId) {
   els.graphInspector.innerHTML = `
     <article class="inspector-card">
       <h3>证据 ${escapeHtml(refId)}</h3>
-      <p class="muted">已同步高亮相关节点与边</p>
+      <p class="muted">已同步高亮相关节点与边。点击图谱空白处可恢复默认视图。</p>
       <div class="chips">
         <span class="pill">节点 ${context.nodes.length}</span>
         <span class="pill">关系 ${context.links.length}</span>
       </div>
       <h4>相关节点</h4>
-      ${context.nodes.length
-        ? context.nodes
-            .map(
-              (node) => `
-                <button class="evidence-chip" data-node-id="${escapeHtml(node.id)}">
-                  <strong>${escapeHtml(node.label)}</strong>
-                  <span>${escapeHtml(node.node_type)} / ${escapeHtml(node.id)}</span>
-                </button>
-              `
-            )
-            .join("")
-        : '<p class="muted">没有直接命中的节点。</p>'}
+      ${
+        context.nodes.length
+          ? context.nodes
+              .map(
+                (node) => `
+                  <button class="evidence-chip" data-node-id="${escapeHtml(node.id)}">
+                    <strong>${escapeHtml(node.label)}</strong>
+                    <span>${escapeHtml(node.node_type)} / ${escapeHtml(node.id)}</span>
+                  </button>
+                `,
+              )
+              .join("")
+          : `<p class="muted">${COPY.graph.noHitNodes}</p>`
+      }
       <h4>相关关系</h4>
-      ${context.links.length
-        ? context.links
-            .map(
-              (link) => `
-                <article class="inspector-link-row">
-                  <strong>${escapeHtml(link.relation)}</strong>
-                  <span class="muted">${escapeHtml(typeof link.source === "object" ? link.source.id : link.source)} -> ${escapeHtml(typeof link.target === "object" ? link.target.id : link.target)}</span>
-                  <p>${escapeHtml(link.evidence || "")}</p>
-                </article>
-              `
-            )
-            .join("")
-        : '<p class="muted">没有直接命中的关系。</p>'}
+      ${
+        context.links.length
+          ? context.links
+              .map(
+                (link) => `
+                  <article class="inspector-link-row">
+                    <strong>${escapeHtml(link.relation)}</strong>
+                    <span class="muted">${escapeHtml(typeof link.source === "object" ? link.source.id : link.source)} -> ${escapeHtml(typeof link.target === "object" ? link.target.id : link.target)}</span>
+                    <p>${escapeHtml(link.evidence || "")}</p>
+                  </article>
+                `,
+              )
+              .join("")
+          : `<p class="muted">${COPY.graph.noHitLinks}</p>`
+      }
     </article>
   `;
 }
@@ -444,24 +491,26 @@ function selectEvidenceRef(refId) {
 function renderGraph(nodes, edges) {
   els.graphCanvas.className = "graph-shell";
   els.graphCanvas.innerHTML = "";
-  els.graphInspector.className = "inspector empty";
-  els.graphInspector.textContent = "点击节点、关系或证据引用后，这里会显示证据说明与关联结构。";
 
   if (!nodes.length) {
     els.graphCanvas.classList.add("empty");
     els.graphCanvas.textContent = "当前材料尚未生成可视化图谱。";
+    els.graphInspector.className = "inspector empty";
+    els.graphInspector.textContent = COPY.graph.defaultInspectorBody;
     return;
   }
 
   if (typeof ForceGraph3D !== "function") {
     els.graphCanvas.classList.add("empty");
     els.graphCanvas.textContent = "3D 图谱组件加载失败。";
+    els.graphInspector.className = "inspector empty";
+    els.graphInspector.textContent = COPY.graph.defaultInspectorBody;
     return;
   }
 
   state.graphData = normalizeGraph(nodes, edges);
   const width = Math.max(480, els.graphCanvas.clientWidth - 24);
-  const height = Math.max(500, els.graphCanvas.clientHeight - 24);
+  const height = Math.max(560, els.graphCanvas.clientHeight - 24);
 
   state.graphInstance = ForceGraph3D()(els.graphCanvas)
     .width(width)
@@ -473,7 +522,7 @@ function renderGraph(nodes, edges) {
     .backgroundColor("rgba(255,255,255,0)")
     .nodeColor((node) => node.color)
     .nodeVal((node) => node.val)
-    .nodeLabel((node) => `${escapeHtml(node.label)}<br/>${escapeHtml(node.node_type)}`)
+    .nodeLabel((node) => `${escapeHtml(node.label)}<br />${escapeHtml(node.node_type)}`)
     .linkColor(() => "rgba(29,26,24,0.2)")
     .linkWidth((link) => 1.5 + Number(link.strength || 0.5))
     .linkOpacity(0.72)
@@ -484,7 +533,11 @@ function renderGraph(nodes, edges) {
     .graphData(state.graphData)
     .onNodeClick((node) => selectNodeById(node.id))
     .onLinkClick((link) => selectLink(link))
+    .onBackgroundClick(() => clearGraphSelection())
     .onEngineStop(() => state.graphInstance && state.graphInstance.zoomToFit(500, 60));
+
+  renderGraphInspectorDefault();
+  applyGraphHighlight();
 }
 
 function ensureAgentCard(profile) {
@@ -502,11 +555,15 @@ function ensureAgentCard(profile) {
         <div class="muted">${escapeHtml(profile.agent_name)} / ${escapeHtml(profile.role)}</div>
       </div>
     </div>
-    <p class="persona-summary">${escapeHtml(profile.current_focus)}</p>
-    <div class="persona-state">${escapeHtml(profile.disposition)}</div>
-    <p class="muted">${escapeHtml(profile.persistent_state)}</p>
-    <ul class="memory-list">${(profile.memory_notes || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-    <div class="agent-rounds"></div>
+    <div class="persona-body">
+      <p class="persona-summary">${escapeHtml(profile.current_focus)}</p>
+      <div class="persona-state">${escapeHtml(profile.disposition)}</div>
+      <p class="muted">${escapeHtml(profile.persistent_state)}</p>
+      <div class="memory-scroll">
+        <ul class="memory-list">${(profile.memory_notes || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </div>
+      <div class="agent-rounds"></div>
+    </div>
   `;
   els.agentRoot.appendChild(card);
   return card;
@@ -530,12 +587,15 @@ function renderAgentTurn(turn) {
   const block = document.createElement("section");
   block.className = "agent-round-block";
   block.innerHTML = `
-    <div class="findings-title">Round ${turn.round_index}</div>
+    <div class="findings-title">Round ${escapeHtml(turn.round_index)}</div>
     <ul>${turn.agent_step.findings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-    <div class="chips">${(turn.agent_step.focus_refs || []).map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("")}</div>
-    <div class="muted">confidence: ${turn.agent_step.confidence.toFixed(2)}</div>
+    <div class="chips">${(turn.agent_step.focus_refs || [])
+      .map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`)
+      .join("")}</div>
+    <div class="muted">confidence: ${escapeHtml(turn.agent_step.confidence.toFixed(2))}</div>
   `;
   roundsRoot.appendChild(block);
+  roundsRoot.scrollTop = roundsRoot.scrollHeight;
 }
 
 function appendSystemDialogue(label, roundIndex) {
@@ -545,7 +605,7 @@ function appendSystemDialogue(label, roundIndex) {
   node.innerHTML = `
     <div class="dialogue-head">
       <span>System</span>
-      <span>Round ${roundIndex}</span>
+      <span>Round ${escapeHtml(roundIndex)}</span>
     </div>
     <p>${escapeHtml(label)}</p>
   `;
@@ -560,10 +620,12 @@ async function playDialogueItems(dialogue = []) {
     node.innerHTML = `
       <div class="dialogue-head">
         <span>${escapeHtml(item.speaker)}</span>
-        <span>Round ${item.round_index} / ${escapeHtml(item.audience)}</span>
+        <span>Round ${escapeHtml(item.round_index)} / ${escapeHtml(item.audience)}</span>
       </div>
       <p>${escapeHtml(item.message)}</p>
-      <div class="chips">${(item.evidence_refs || []).map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("")}</div>
+      <div class="chips">${(item.evidence_refs || [])
+        .map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`)
+        .join("")}</div>
     `;
     els.agentDialogue.appendChild(node);
     els.agentDialogue.scrollTop = els.agentDialogue.scrollHeight;
@@ -579,12 +641,12 @@ function renderResults(finalResult) {
           <div class="ranking-score">#${index + 1}</div>
           <strong>${escapeHtml(item.name)}</strong>
           <div class="muted">${escapeHtml(item.role)}</div>
-          <p><strong>动机:</strong> ${escapeHtml(item.motive)}</p>
-          <p><strong>手段:</strong> ${escapeHtml(item.means)}</p>
-          <p><strong>机会:</strong> ${escapeHtml(item.opportunity)}</p>
-          <ul>${item.supporting_evidence.map((evidence) => `<li>${escapeHtml(evidence)}</li>`).join("")}</ul>
+          <p><strong>动机或驱动：</strong>${escapeHtml(item.motive)}</p>
+          <p><strong>手段或路径：</strong>${escapeHtml(item.means)}</p>
+          <p><strong>机会或触发点：</strong>${escapeHtml(item.opportunity)}</p>
+          <ul>${(item.supporting_evidence || []).map((evidence) => `<li>${escapeHtml(evidence)}</li>`).join("")}</ul>
         </article>
-      `
+      `,
     )
     .join("");
 
@@ -592,38 +654,40 @@ function renderResults(finalResult) {
     .map(
       (item) => `
         <article class="timeline-row">
-          <strong>${item.order}. ${escapeHtml(item.phase)}</strong>
+          <strong>${escapeHtml(item.order)}. ${escapeHtml(item.phase)}</strong>
           <div class="muted">${escapeHtml(item.time_hint)} / ${escapeHtml(item.inference_level)}</div>
           <p>${escapeHtml(item.event)}</p>
-          <div class="chips">${item.evidence_refs.map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("")}</div>
+          <div class="chips">${(item.evidence_refs || [])
+            .map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`)
+            .join("")}</div>
         </article>
-      `
+      `,
     )
     .join("");
 
   els.resultRoot.className = "result-grid";
   els.resultRoot.innerHTML = `
     <article class="result-card result-scroll-card">
-      <div class="card-head"><h3>案情解释</h3><span class="muted">主解释与综合结论</span></div>
+      <div class="card-head"><h3>分析解释</h3><span class="muted">主解释与综合判断</span></div>
       <div class="scroll-pane">
         <p>${escapeHtml(finalResult.case_explanation)}</p>
-        <p><strong>综合结论:</strong> ${escapeHtml(finalResult.verdict_summary)}</p>
+        <p><strong>综合结论：</strong>${escapeHtml(finalResult.verdict_summary)}</p>
       </div>
     </article>
     <article class="result-card result-scroll-card">
-      <div class="card-head"><h3>证据说明</h3><span class="muted">可滚动查看</span></div>
+      <div class="card-head"><h3>证据与不确定性</h3><span class="muted">滚动查看</span></div>
       <div class="scroll-pane">
-        <ul>${finalResult.evidence_notes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        <h3>不确定性</h3>
-        <ul>${finalResult.uncertainties.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <ul>${(finalResult.evidence_notes || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <h3>未决问题</h3>
+        <ul>${(finalResult.uncertainties || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
       </div>
     </article>
     <article class="result-card result-scroll-card">
-      <div class="card-head"><h3>嫌疑人排序</h3><span class="muted">支持滚动</span></div>
-      <div class="scroll-pane ranking-table">${rankingRows || "<p>暂无嫌疑人排序。</p>"}</div>
+      <div class="card-head"><h3>关键对象排序</h3><span class="muted">支持滚动</span></div>
+      <div class="scroll-pane ranking-table">${rankingRows || "<p>暂无可用排序。</p>"}</div>
     </article>
     <article class="result-card result-scroll-card">
-      <div class="card-head"><h3>案情重演时间线</h3><span class="muted">带证据引用</span></div>
+      <div class="card-head"><h3>回溯时间线</h3><span class="muted">带证据引用</span></div>
       <div class="scroll-pane timeline-list">${timelineRows || "<p>暂无可用时间线。</p>"}</div>
     </article>
   `;
@@ -663,7 +727,7 @@ async function loadSample() {
   const sample = await fetchJson("/api/case-sample");
   els.rawText.value = sample.seed_text;
   els.expectedOutcome.value = sample.expected_outcome;
-  setStatus(`样例已载入: ${sample.title}`);
+  setStatus(`样例已载入：${sample.title}`);
 }
 
 async function runWorkflow() {
@@ -688,7 +752,7 @@ async function runWorkflow() {
     els.modelBadge.textContent = "reasoning";
     updatePipeline("in_progress", "pending");
 
-    for (const roundPlan of COLLABORATION_PLAN) {
+    for (const roundPlan of COPY.collaborationPlan) {
       appendSystemDialogue(roundPlan.label, roundPlan.roundIndex);
       setStatus(`${roundPlan.label} 进行中`);
       for (const agentName of roundPlan.agents) {
@@ -765,6 +829,13 @@ function handleRefClick(event) {
   }
 }
 
+window.addEventListener("resize", () => {
+  if (!state.graphInstance) return;
+  const width = Math.max(480, els.graphCanvas.clientWidth - 24);
+  const height = Math.max(560, els.graphCanvas.clientHeight - 24);
+  state.graphInstance.width(width).height(height);
+});
+
 els.graphInspector.addEventListener("click", handleRefClick);
 els.documentRoot.addEventListener("click", handleRefClick);
 els.resultRoot.addEventListener("click", handleRefClick);
@@ -775,4 +846,5 @@ document.getElementById("saveConfig").addEventListener("click", saveConfig);
 document.getElementById("loadSample").addEventListener("click", loadSample);
 document.getElementById("runWorkflow").addEventListener("click", runWorkflow);
 
+resetWorkspace();
 bootstrap();

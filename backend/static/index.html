@@ -12,17 +12,18 @@
       <section class="hero">
         <div>
           <p class="eyebrow">Salmon</p>
-          <h1>用于案情回溯与因果重建的多智能体工作台</h1>
+          <h1>Salmon：从结果逆流而上，重建形成过程，用于回溯和归因的多智能体分析平台</h1>
           <p class="subcopy">
-            Salmon 面向案情重演、历史回溯与复杂局面成因分析。系统先对文档进行解析，构建人物、事件、线索之间的关系图谱，
-            再由多智能体逐步完成证据审计、关系建模、嫌疑排序、时间线回推与综合判断，帮助用户观察结果是如何形成的。
+            Salmon 面向案情重演、情侣情绪分析、舆情归因等回溯任务。系统先解析文档与文本材料，构建可交互的关系图谱，
+            再由多智能体围绕证据、关系、时序、情绪或传播链进行多轮协作，最终输出可追溯、可解释、可扩展的分析结果。
           </p>
         </div>
         <div class="hero-note">
           <span>Project Summary</span>
-          <strong>Reverse-First Reconstruction</strong>
+          <strong>Reverse-Flow Attribution</strong>
           <p>
-            以回溯为起点，以证据为约束。输出主解释、备选解释、关键证据、嫌疑排序与重演时间线，并为后续更多回溯用例保留扩展空间。
+            以结果为入口，以证据为约束，以图谱和代理协作为分析骨架。支持结构化回溯、关键对象排序、时间线重建、
+            情绪与舆情链路解释，并为后续更多归因场景保留统一扩展接口。
           </p>
         </div>
       </section>
@@ -64,7 +65,7 @@
             </div>
             <label class="field">
               <span>分析目标</span>
-              <input id="expectedOutcome" placeholder="例如：重建案件形成链条，并评估主要嫌疑对象。" />
+              <input id="expectedOutcome" placeholder="例如：重建形成链条，并识别关键对象与关键转折点。" />
             </label>
             <label class="field">
               <span>上传文件</span>
@@ -72,13 +73,13 @@
             </label>
             <label class="field">
               <span>或直接输入文本</span>
-              <textarea id="rawText" rows="14" placeholder="粘贴案情材料、证言、纪要、记录或其他文本内容"></textarea>
+              <textarea id="rawText" rows="14" placeholder="粘贴案情材料、聊天记录、舆情纪要、证言、报告或其他文本内容"></textarea>
             </label>
-            <button id="runWorkflow" class="primary">启动重演</button>
+            <button id="runWorkflow" class="primary">启动回溯分析</button>
           </article>
 
           <article class="panel">
-            <h2>架构说明</h2>
+            <h2>系统设计</h2>
             <ul id="designNotes" class="note-list"></ul>
           </article>
         </aside>
@@ -89,7 +90,7 @@
               <h2>分析流程</h2>
               <span id="statusText" class="status">等待任务</span>
             </div>
-            <div id="pipelineRoot" class="pipeline empty">任务启动后，这里会依次展示解析、图谱、智能体与结果阶段。</div>
+            <div id="pipelineRoot" class="pipeline empty">任务启动后，这里会依次展示解析、图谱、智能体协作与综合输出阶段。</div>
           </article>
 
           <article class="panel wide">
@@ -107,18 +108,18 @@
           <article class="panel wide">
             <div class="panel-head">
               <h2>多智能体协作</h2>
-              <span class="muted">先渲染角色，再按代理顺序逐步执行推演</span>
+              <span class="muted">先渲染代理，再按轮次展示协作过程与回合日志</span>
             </div>
             <div class="agent-layout">
               <div id="agentRoot" class="grid-two empty">智能体将在图谱准备完成后初始化。</div>
-              <div id="agentDialogue" class="dialogue-feed empty">代理交互日志会随着推理逐步出现。</div>
+              <div id="agentDialogue" class="dialogue-feed empty">交互日志会随着推理逐步出现。</div>
             </div>
           </article>
 
           <article class="panel wide">
             <div class="panel-head">
               <h2>综合输出</h2>
-              <span class="muted">案情解释 / 嫌疑人排序 / 重演时间线</span>
+              <span class="muted">解释、关键对象排序、证据说明与回溯时间线</span>
             </div>
             <div id="resultRoot" class="result-grid empty">最终分析结果将在这里生成。</div>
           </article>

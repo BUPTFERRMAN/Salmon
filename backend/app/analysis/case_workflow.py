@@ -399,19 +399,8 @@ def _build_case_llm_prompts(text: str, outcome: str, document: UploadedDocument,
     clue_block = "\n".join(f"- {item}" for item in sections["clues"]) or "- None explicitly provided."
     extra_block = "\n".join(f"- {item}" for item in sections["extra"]) or "- No extra sections."
     mode = _classify_prompt_mode(text, outcome)
-    if mode == "case_reenactment":
-        extra_constraints = """
-- This request is a case reenactment task. Preserve suspect ranking, timeline reconstruction, and evidence coverage.
-- Prefer one mechanism that explains multiple clues at once.
-- If the material includes space, access, device, time-gap, or other structural anomalies, test whether they combine into one mechanism chain.
-- Suspect ranking must clearly state which material supports motive, means, opportunity, and clue coverage.
-""".strip()
-    else:
-        extra_constraints = """
-- This request is a general backtracing task rather than a pure criminal case.
-- Focus on causal structure, competing explanations, and hidden turning points.
-- Reuse the same schema without forcing crime-specific assumptions.
-""".strip()
+    extra_constraints = _mode_specific_constraints(mode)
+    ranking_label = _mode_ranking_label(mode)
 
     system_prompt = f"""
 You are Salmon's reconstruction structuring agent.
@@ -420,14 +409,16 @@ All natural-language values in the JSON must be written in {target_language}.
 Keep the JSON keys in English.
 Treat background as context, clues as the main evidence layer, and never convert inference into fact.
 Build a reusable structured graph that can support downstream multi-agent reasoning.
-When ranking candidates, use motive, means, opportunity, and clue coverage when relevant.
+The current analysis mode is: {mode}.
+When ranking candidates, use motive, means, opportunity, clue coverage, or the closest equivalent for this mode.
+For compatibility, always write the ranked objects into suspect_rankings, even when they represent key actors, conflict drivers, or responsibility centers rather than literal suspects.
 
 Output schema:
 background_summary: string
 actors: [{{name, role, relation, suspicion_score, motive, means, opportunity, evidence_refs}}]
 events: [{{id, time_hint, description, actors, evidence_refs, inference_level}}]
 clues: [{{id, label, detail, actors, event_ids, risk_level, evidence_refs}}]
-suspect_rankings: [{{name, role, suspicion_score, motive, means, opportunity, supporting_evidence, concerns}}]
+suspect_rankings: [{{name, role, suspicion_score, motive, means, opportunity, supporting_evidence, concerns}}]  # {ranking_label}
 reenactment_timeline: [{{order, phase, time_hint, event, evidence_refs, inference_level}}]
 evidence_notes: [string]
 verdict_summary: string
@@ -436,7 +427,7 @@ uncertainties: [string]
 """.strip()
 
     user_prompt = f"""
-Case goal:
+Analysis goal:
 {outcome}
 
 Document info:
@@ -460,8 +451,6 @@ Extra constraints:
 {extra_constraints}
 """.strip()
     return system_prompt, user_prompt
-
-
 def _split_case_sections(text: str) -> Dict[str, List[str]]:
     sections = {"background": [], "clues": [], "extra": []}
     current = "extra"
@@ -484,26 +473,136 @@ def _split_case_sections(text: str) -> Dict[str, List[str]]:
 
 
 def _classify_prompt_mode(text: str, outcome: str) -> str:
-    sample = f"{outcome}\n{text[:4000]}".lower()
-    case_keywords = [
-        "案情",
-        "案件",
-        "嫌疑",
-        "凶手",
-        "证据",
-        "线索",
-        "案发",
-        "案情重演",
-        "suspect",
-        "murder",
-        "crime",
-        "evidence",
-        "reenact",
-    ]
-    hits = sum(1 for keyword in case_keywords if keyword in sample)
-    return "case_reenactment" if hits >= 2 else "general_backtrace"
+    sample = f"{outcome}\n{text[:5000]}".lower()
+    keyword_groups = {
+        "case_reenactment": [
+            "\u6848\u60c5",
+            "\u6848\u4ef6",
+            "\u5acc\u7591",
+            "\u5acc\u7591\u4eba",
+            "\u51f6\u624b",
+            "\u4f5c\u6848",
+            "\u6848\u53d1",
+            "\u8bc1\u636e",
+            "\u4fa6\u67e5",
+            "crime",
+            "suspect",
+            "forensic",
+            "murder",
+            "reenact",
+            "evidence",
+        ],
+        "relationship_emotion": [
+            "\u60c5\u4fa3",
+            "\u611f\u60c5",
+            "\u60c5\u7eea",
+            "\u4e89\u5435",
+            "\u5173\u7cfb",
+            "\u6c9f\u901a",
+            "\u804a\u5929\u8bb0\u5f55",
+            "\u8bef\u89e3",
+            "\u51b7\u6218",
+            "emotion",
+            "relationship",
+            "conflict",
+            "chat",
+            "argument",
+            "repair attempt",
+        ],
+        "public_opinion_attribution": [
+            "\u8206\u60c5",
+            "\u516c\u5173",
+            "\u4f20\u64ad",
+            "\u54c1\u724c\u5371\u673a",
+            "\u5a92\u4f53",
+            "\u70ed\u641c",
+            "\u58f0\u91cf",
+            "\u5e73\u53f0",
+            "\u56de\u5e94",
+            "public opinion",
+            "reputation",
+            "brand crisis",
+            "social media",
+            "narrative",
+            "statement",
+        ],
+    }
+    scores = {mode: sum(1 for keyword in keywords if keyword in sample) for mode, keywords in keyword_groups.items()}
+    best_mode = max(scores, key=scores.get)
+    return best_mode if scores[best_mode] >= 2 else "general_backtrace"
 
 
+def _mode_specific_constraints(mode: str) -> str:
+    constraints = {
+        "case_reenactment": """
+- This request is a case reenactment task. Preserve suspect ranking, timeline reconstruction, and evidence coverage.
+- Prefer one mechanism that explains multiple clues at once.
+- If the material includes space, access, device, time-gap, or other structural anomalies, test whether they combine into one mechanism chain.
+- Suspect ranking must clearly state which material supports motive, means, opportunity, and clue coverage.
+""".strip(),
+        "relationship_emotion": """
+- This request is a relationship or emotional backtrace task.
+- Track each side's emotion shifts, unmet needs, defensive moves, repair attempts, and escalation points.
+- Use suspect_rankings to represent the key actors or conflict drivers rather than literal suspects.
+- Reconstruct the timeline around trigger moments, misunderstanding loops, and failed repair windows.
+""".strip(),
+        "public_opinion_attribution": """
+- This request is a public-opinion or narrative-attribution task.
+- Focus on the chain from operational trigger to public narrative escalation, response failure, and perception shift.
+- Use suspect_rankings to represent key actors, responsibility centers, or escalation drivers.
+- Reconstruct the timeline around trigger event, amplification, official response, counter-reaction, and stabilization attempt.
+""".strip(),
+        "general_backtrace": """
+- This request is a general backtracing task rather than a single predefined scenario.
+- Focus on causal structure, competing explanations, hidden turning points, and evidentiary limits.
+- Reuse the same schema without forcing crime-specific assumptions.
+""".strip(),
+    }
+    return constraints.get(mode, constraints["general_backtrace"])
+
+
+def _mode_ranking_label(mode: str) -> str:
+    labels = {
+        "case_reenactment": "ranked suspects or highest-priority persons of interest",
+        "relationship_emotion": "ranked key actors or conflict drivers",
+        "public_opinion_attribution": "ranked responsibility centers or escalation drivers",
+        "general_backtrace": "ranked key actors or mechanisms",
+    }
+    return labels.get(mode, labels["general_backtrace"])
+
+
+def _mode_agent_focus(mode: str, agent_name: str) -> str:
+    focus_map = {
+        "case_reenactment": {
+            "Evidence Agent": "prioritize hard evidence, contradictions, and mechanism-sensitive clues.",
+            "Relationship Agent": "map who is linked to whom, through what incentives or hidden ties.",
+            "Suspicion Agent": "rank persons of interest by motive, means, opportunity, and clue coverage.",
+            "Reconstruction Agent": "rebuild the most plausible mechanism chain and event order.",
+            "Judge Agent": "compare main and alternative explanations while preserving uncertainty.",
+        },
+        "relationship_emotion": {
+            "Evidence Agent": "identify emotionally loaded utterances, unmet needs, and explicit trigger sentences.",
+            "Relationship Agent": "map attachment needs, misread intentions, power balance, and repeated patterns.",
+            "Suspicion Agent": "rank the main conflict drivers, misunderstandings, or escalation sources.",
+            "Reconstruction Agent": "rebuild the escalation path from expectation, to hurt, to defense, to withdrawal or repair.",
+            "Judge Agent": "balance both sides' intentions, injuries, and plausible misreadings.",
+        },
+        "public_opinion_attribution": {
+            "Evidence Agent": "identify high-leverage facts, public-facing evidence, and narrative turning points.",
+            "Relationship Agent": "map the relationship between organization, audience, media, platform, and spokesperson.",
+            "Suspicion Agent": "rank the main responsibility centers or escalation drivers.",
+            "Reconstruction Agent": "rebuild the path from trigger event to amplification, backlash, response, and aftershock.",
+            "Judge Agent": "compare responsibility narratives and keep visible what remains uncertain.",
+        },
+        "general_backtrace": {
+            "Evidence Agent": "identify the strongest evidence and the most dangerous blind spots.",
+            "Relationship Agent": "map the main stakeholders, dependencies, and hidden ties.",
+            "Suspicion Agent": "rank the strongest drivers, actors, or explanations.",
+            "Reconstruction Agent": "rebuild the causal chain and the most important turning points.",
+            "Judge Agent": "synthesize the main and secondary explanations while preserving uncertainty.",
+        },
+    }
+    return focus_map.get(mode, focus_map["general_backtrace"]).get(agent_name, "focus on the most evidence-supported interpretation.")
 def _normalize_llm_payload(payload: Dict) -> Dict:
     def ensure_list(value):
         if isinstance(value, list):
@@ -1019,6 +1118,7 @@ def _build_agent_turn_prompts(
     round_index: int,
 ) -> Tuple[str, str]:
     target_language = "Simplified Chinese" if detected_language == "zh-CN" else "English"
+    mode = _classify_prompt_mode("\n".join(structured_case.get("evidence_notes", [])), expected_outcome)
     prior_summary = "\n".join(f"- {step.agent_name}: {' | '.join(step.findings[:3])}" for step in prior_steps) or "- None yet."
     dialogue_summary = "\n".join(
         f"- round {item.round_index} {item.speaker} -> {item.audience}: {item.message}"
@@ -1042,6 +1142,7 @@ Return one valid JSON object and nothing else.
 All natural-language values must be written in {target_language}.
 Keep the JSON keys in English.
 Stay evidence-constrained and reusable across future cases.
+The current analysis mode is: {mode}.
 You are participating in a multi-round collaboration, so react to earlier specialist findings instead of repeating them.
 
 Output schema:
@@ -1062,6 +1163,7 @@ Current specialist:
 - role: {spec['role'][detected_language]}
 - purpose: {L10N[detected_language][spec['purpose_key']]}
 - round_index: {round_index} / {AGENT_COLLAB_ROUNDS}
+- mode_focus: {_mode_agent_focus(mode, spec['agent_name'])}
 
 Actors:
 {actor_block}
@@ -1086,8 +1188,6 @@ Constraints:
 - Keep the style reusable; do not assume facts outside the material.
 """.strip()
     return system_prompt, user_prompt
-
-
 def _run_final_synthesis_with_llm(
     llm_client: OpenAICompatibleClient,
     structured_case: Dict,
@@ -1124,6 +1224,7 @@ def _build_final_synthesis_prompts(
     agent_steps: List[AgentStep],
 ) -> Tuple[str, str]:
     target_language = "Simplified Chinese" if detected_language == "zh-CN" else "English"
+    mode = _classify_prompt_mode("\n".join(structured_case.get("evidence_notes", [])), expected_outcome)
     agent_block = "\n".join(f"- {step.agent_name}: {' | '.join(step.findings[:4])}" for step in agent_steps) or "- None."
     ranking_block = "\n".join(
         f"- {item.get('name')}: score={item.get('suspicion_score')} role={item.get('role')}"
@@ -1139,6 +1240,8 @@ Return one valid JSON object and nothing else.
 All natural-language values must be written in {target_language}.
 Keep the JSON keys in English.
 Stay evidence-constrained and preserve uncertainty.
+The current analysis mode is: {mode}.
+Keep suspect_rankings compatible with the existing schema even when they represent key actors or responsibility centers.
 """.strip()
     user_prompt = f"""
 Task:
@@ -1157,6 +1260,9 @@ Working timeline:
 Agent outputs:
 {agent_block}
 
+Mode guidance:
+{_mode_specific_constraints(mode)}
+
 Output schema reminder:
 - case_explanation
 - verdict_summary
@@ -1166,8 +1272,6 @@ Output schema reminder:
 - uncertainties
 """.strip()
     return system_prompt, user_prompt
-
-
 def _build_exchange(agent_name: str, audience: str, step: AgentStep, structured: Dict, language: str, round_index: int) -> AgentExchange:
     loc = L10N[language]
     top_clue = (structured.get("clues") or [{}])[0]
