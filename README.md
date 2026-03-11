@@ -60,6 +60,25 @@ Salmon 是一个面向案件回放、历史回溯与因果链分析的多智能�
   - 不确定性与置信度标注
   - 你指定格式的报告结构（如重演叙述、角色分析、时间线、缺口清单）
 
+## 示例场景
+
+### 示例 1：智能侦探 - 案情回溯
+
+- [案情结果：《巴斯克维尔的猎犬》.txt](examples/example-1-case-backtrace/案情结果：《巴斯克维尔的猎犬》.txt)
+- [案情结果：《斑点带子案》.txt](examples/example-1-case-backtrace/案情结果：《斑点带子案》.txt)
+- [案情问题.txt](examples/example-1-case-backtrace/案情问题.txt)
+- [案情线索：《巴斯克维尔的猎犬》.txt](examples/example-1-case-backtrace/案情线索：《巴斯克维尔的猎犬》.txt)
+- [案情线索：《斑点带子案》.txt](examples/example-1-case-backtrace/案情线索：《斑点带子案》.txt)
+
+### 示例 2：聊天助手 - 恋爱分析
+
+- [情侣聊天.txt](examples/example-2-love-chat/情侣聊天.txt)
+- [情侣聊天问题.txt](examples/example-2-love-chat/情侣聊天问题.txt)
+
+### 示例 3：反思者 - 舆情归因
+
+- [航空案例舆情线索.txt](examples/example-3-public-opinion/航空案例舆情线索.txt)
+
 ## 模型接入
 
 后端采用 OpenAI 兼容 API 模式。默认本地配置为 DeepSeek：
