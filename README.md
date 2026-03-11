@@ -1,78 +1,76 @@
 # Salmon
 
-**Reconstruct the past, not just predict the future.**  
-**Salmon：从结果逆流而上，重建形成过程。**
+<p align="center">
+  <img src="backend/static/logo.png" alt="Salmon Logo" width="180" />
+</p>
 
-Salmon is a multi-agent reconstruction workspace for case replay, historical backtracing, and causal chain analysis.
+**不是预测未来，而是重建过去。**
 
-Most agent systems are designed to forecast what happens next. Salmon is built for a different mission: reconstruct how an outcome was formed. It turns scattered material into structured evidence, then derives multiple plausible paths with visible support, counter-evidence, and uncertainty.
+Salmon 是一个面向案件回放、历史回溯与因果链分析的多智能体重建工作空间。  
+它把零散材料转成结构化证据，再通过多智能体反向推理，重建“结果如何形成”的过程。
 
-Whether you are reviewing a case, replaying a historical process, diagnosing a complex situation, or repairing a narrative chain, Salmon provides a traceable reasoning workflow instead of a single rigid answer.
+## 为什么是 Salmon
 
-## Why Salmon
+- `Reverse-first`：从结果逆推成因，而不是从目标正推未来。
+- `Evidence-constrained`：每条解释路径都绑定证据节点与反证信息。
+- `Multi-hypothesis`：默认给出竞争性解释，而不是单一路径。
+- `Replay-oriented`：输出可复盘、可质疑、可重演的形成链。
 
-- Reverse-first by design: infer causes from outcomes, not future branches from prompts.
-- Evidence-constrained reconstruction: every path is bound to evidence nodes in the source material.
-- Multi-hypothesis output: compare competing explanations instead of overcommitting to one story.
-- Replay-oriented results: inspect turning points, challenge assumptions, and rerun analysis.
-
-## Staged Reconstruction Pipeline
+## 分阶段回溯流程
 
 1. `Document Parsing`  
-   Parse PDF / TXT / MD content and extract entities, events, and temporal signals.
+   解析 PDF / TXT / MD，提取人物、事件、时间与关键线索。
 2. `Graph Construction`  
-   Build people-event-clue structure and candidate causal links.
+   构建人物-事件-线索关系图和候选因果链。
 3. `Multi-Agent Reverse Reasoning`  
-   Specialist agents collaborate and challenge each other across evidence, motives, suspicion, and reconstruction.
+   多角色 Agent 围绕证据、动机、疑点和路径展开协作与交叉校验。
 4. `Final Synthesis`  
-   Deliver a primary path, alternatives, key evidence, uncertainty markers, and missing-data gaps.
+   输出主路径、备选路径、关键证据、不确定性与缺证点。
 
-## Technical Highlights
+## 技术亮点
 
 ### 1) Reverse-First Multi-Agent Architecture
-Salmon reasons from observed outcomes back to hidden drivers, rather than planning forward from goals.
+以“回溯重建”为中心，而非“未来规划”为中心。
 
 ### 2) Evidence-Constrained Reconstruction
-Generated explanations must map to evidence and are tested against counter-signals to reduce plausible-but-wrong hallucinations.
+解释必须有证据锚点，并结合反证信息评估可信度。
 
 ### 3) Graph-Native Reasoning
-Text is converted into graph structures so the system can expose overlooked nodes, latent couplings, role shifts, and necessary preconditions.
+将文本转化为图结构，便于发现隐性耦合、角色变化和关键前置条件。
 
 ### 4) Multi-Hypothesis, Not Single Answer
-Salmon compares multiple causal paths and surfaces strengths, weaknesses, and confidence levels for each.
+并行生成多条解释路径，展示各自强弱与置信度。
 
 ### 5) From Fragments to Replay
-The end goal is replayability: reconstructing how a situation evolved from early clues to final outcome.
+从碎片到重演，重建事件的完整演化过程。
 
-## Current Capabilities
+## 当前能力
 
-- Upload and parse text-based PDF, TXT, and Markdown files.
-- Build an interactive people-event-clue graph.
-- Run five specialist agents:
+- 解析文本型 PDF / TXT / Markdown 材料。
+- 构建可交互的人物-事件-线索图谱。
+- 支持五类专长代理协作：
   - `Evidence Agent`
   - `Relationship Agent`
   - `Suspicion Agent`
   - `Reconstruction Agent`
   - `Judge Agent`
-- Goal-conditioned output (not fixed templates):
-  - reconstructed causal paths and key turning points
-  - competing hypotheses with evidence and counter-evidence
-  - uncertainty and confidence annotations
-  - user-requested report structure (for example: narrative replay, role analysis, timeline, or gap checklist)
+- 输出按用户目标动态组织（非固定模板）：
+  - 因果路径与关键转折点
+  - 竞争性解释及证据/反证
+  - 不确定性与置信度标注
+  - 你指定格式的报告结构（如重演叙述、角色分析、时间线、缺口清单）
 
-## Model Access
+## 模型接入
 
-The backend uses an OpenAI-compatible API pattern.
-
-Default local configuration is set for DeepSeek:
+后端采用 OpenAI 兼容 API 模式。默认本地配置为 DeepSeek：
 
 - `provider_name = DeepSeek`
 - `base_url = https://api.deepseek.com`
 - `model = deepseek-reasoner`
 
-If `api.txt` exists in the workspace root, Salmon will read the API key automatically.
+若工作区根目录存在 `api.txt`，Salmon 会自动读取 API Key。
 
-## Run
+## 运行方式
 
 ```bash
 cd backend
@@ -80,7 +78,7 @@ python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 ```
 
-Open [http://127.0.0.1:8010](http://127.0.0.1:8010)
+打开 [http://127.0.0.1:8010](http://127.0.0.1:8010)
 
 ## API
 
@@ -90,8 +88,8 @@ Open [http://127.0.0.1:8010](http://127.0.0.1:8010)
 - `POST /api/case-reason`
 - `POST /api/case-workflow`
 
-## Notes
+## 备注
 
-- The current PDF parser is optimized for text-based PDFs, not scanned-image OCR.
-- The current agent layer is a role-based analytical workflow, not a full autonomous society simulation.
-- The graph view is interactive and 3D, with node and relation inspection.
+- 当前 PDF 解析器针对文本型 PDF，未包含扫描件 OCR。
+- 当前 Agent 层为角色化分析工作流，并非完整社会仿真系统。
+- 图谱视图支持交互式节点与关系检查。

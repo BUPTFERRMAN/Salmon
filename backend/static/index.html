@@ -12,22 +12,15 @@
       <section class="hero">
         <div>
           <div class="brand-line">
-            <img src="/static/logo.png" alt="Salmon Logo" class="brand-logo" />
             <p class="eyebrow">Salmon</p>
           </div>
-          <h1>Salmon：不是预测未来，而是重建过去。</h1>
+          <h1>Salmon：从结果逆流而上，重建形成过程，用于回溯和归因的多智能体分析平台</h1>
           <p class="subcopy">
-            Salmon 是一个面向案件回放、历史回溯与因果链分析的多智能体工作空间。
-            它将文档解析、关系建图、反向推理与综合裁决串联成可追踪流程，帮助你看清“结果是如何一步步形成的”。
+            Salmon 面向案情重演、情侣情绪分析、舆情归因以及更多可扩展的回溯任务。系统会先解析材料并构建关系图谱，再以图谱证据为骨架组织多智能体协作推演，最后按你的分析目标输出可追溯、可质疑、可复盘的结果面板。
           </p>
         </div>
-        <div class="hero-note">
-          <span>为什么是 Salmon</span>
-          <strong>逆向回溯，证据约束</strong>
-          <p>
-            从终局逆流而上，在多条竞争解释路径中标注证据、反证与不确定性。
-            你得到的不只是结论，而是可复盘、可质疑、可重演的形成链。
-          </p>
+        <div class="logo-panel">
+          <img src="/static/logo.png" alt="Salmon Logo" class="hero-logo" />
         </div>
       </section>
 
@@ -56,9 +49,9 @@
             </label>
             <label class="field">
               <span>API Key</span>
-              <input id="apiKey" type="password" placeholder="仅在需要覆盖默认配置时填写" />
+              <input id="apiKey" type="password" placeholder="仅在需要覆盖本地配置时填写" />
             </label>
-            <p id="configState" class="muted">尚未读取模型配置。</p>
+            <p id="configState" class="muted">正在读取模型配置。</p>
           </article>
 
           <article class="panel">
@@ -68,7 +61,7 @@
             </div>
             <label class="field">
               <span>分析目标</span>
-              <input id="expectedOutcome" placeholder="例如：重建形成链条，并识别关键对象与关键转折点。" />
+              <input id="expectedOutcome" placeholder="例如：重建形成链条、识别关键对象、解释情绪升级、定位舆情归因" />
             </label>
             <label class="field">
               <span>上传文件</span>
@@ -76,7 +69,7 @@
             </label>
             <label class="field">
               <span>或直接输入文本</span>
-              <textarea id="rawText" rows="14" placeholder="粘贴案情材料、聊天记录、舆情纪要、证言、报告或其他文本内容"></textarea>
+              <textarea id="rawText" rows="14" placeholder="粘贴案情材料、聊天记录、舆情纪要、证词、报告或其他待回溯文本"></textarea>
             </label>
             <button id="runWorkflow" class="primary">启动回溯分析</button>
           </article>
@@ -93,36 +86,36 @@
               <h2>分析流程</h2>
               <span id="statusText" class="status">等待任务</span>
             </div>
-            <div id="pipelineRoot" class="pipeline empty">任务启动后，这里会依次展示解析、图谱、智能体协作与综合输出阶段。</div>
+            <div id="pipelineRoot" class="pipeline empty">任务启动后，这里会持续展示文档解析、图谱构建、多智能体协作与综合输出四个阶段。</div>
           </article>
 
           <article class="panel wide">
             <div class="panel-head">
               <h2>材料概览与关系图谱</h2>
-              <span id="modelBadge" class="badge">rules_only</span>
+              <span id="modelBadge" class="badge">idle</span>
             </div>
             <div id="documentRoot" class="document empty">尚未载入材料。</div>
             <div class="graph-layout">
               <div id="graphCanvas" class="graph-shell empty">图谱尚未生成。</div>
-              <aside id="graphInspector" class="inspector empty">点击节点、关系、证据引用或关联节点后，这里会显示详细说明。</aside>
+              <aside id="graphInspector" class="inspector empty">点击节点、关系、证据引用或关联节点后，这里会显示详细属性、证据摘录与联动说明。</aside>
             </div>
           </article>
 
           <article class="panel wide">
             <div class="panel-head">
               <h2>多智能体协作</h2>
-              <span class="muted">先渲染代理，再按轮次展示协作过程与回合日志</span>
+              <span class="muted">先展示代理角色，再持续接收多轮交互与推演结果</span>
             </div>
             <div class="agent-layout">
-              <div id="agentRoot" class="grid-two empty">智能体将在图谱准备完成后初始化。</div>
-              <div id="agentDialogue" class="dialogue-feed empty">交互日志会随着推理逐步出现。</div>
+              <div id="agentRoot" class="grid-two empty">图谱准备完成后，这里会初始化多智能体角色。</div>
+              <div id="agentDialogue" class="dialogue-feed empty">多轮代理日志会随推理逐步出现。</div>
             </div>
           </article>
 
           <article class="panel wide">
             <div class="panel-head">
               <h2>综合输出</h2>
-              <span class="muted">解释、关键对象排序、证据说明与回溯时间线</span>
+              <span class="muted">根据分析目标动态组织输出窗口，最多展示六个面板</span>
             </div>
             <div id="resultRoot" class="result-grid empty">最终分析结果将在这里生成。</div>
           </article>
