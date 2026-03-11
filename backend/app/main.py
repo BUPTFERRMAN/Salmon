@@ -10,7 +10,7 @@ from app.api.routes import router
 BASE_DIR = Path(__file__).resolve().parents[1]
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="BackTrace Demo", version="0.1.0")
+app = FastAPI(title="Salmon", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BackTrace Case Studio</title>
+    <title>Salmon</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -11,16 +11,17 @@
     <main class="page">
       <section class="hero">
         <div>
-          <p class="eyebrow">BackTrace / Case Studio</p>
-          <h1>上传材料后，先解析，再出图谱，再跑智能体，最后给出案情重演结果。</h1>
+          <p class="eyebrow">Salmon</p>
+          <h1>面向案情重演、历史溯源与因果回放的多智能体分析框架</h1>
           <p class="subcopy">
-            这版工作台把等待拆成了可见步骤。用户会先看到文档解析和关系图谱，再看到多智能体交互过程，最后得到案情解释、嫌疑人排序和带证据引用的重演时间线。
+            Salmon 将文档解析、关系图谱、多智能体推演与综合裁决组织为一条可观察的分析链路。
+            用户可以上传 PDF 或文本材料，逐步查看图谱构建、智能体协作与最终解释结果。
           </p>
         </div>
         <div class="hero-note">
-          <span>当前主线</span>
-          <strong>案情重演</strong>
-          <p>支持 PDF、TXT、MD 或直接粘贴文本。模型接入采用 OpenAI 兼容接口，本地调试默认可走 DeepSeek。</p>
+          <span>Project Summary</span>
+          <strong>Evidence-Driven Reconstruction</strong>
+          <p>用于案情重演、复杂事件回溯、历史材料溯源与叙事逻辑校验的可视化工作台。</p>
         </div>
       </section>
 
@@ -28,12 +29,12 @@
         <aside class="sidebar">
           <article class="panel">
             <div class="panel-head">
-              <h2>模型接入</h2>
+              <h2>模型配置</h2>
               <button id="saveConfig" class="ghost small">保存</button>
             </div>
             <label class="switch">
               <input id="modelEnabled" type="checkbox" />
-              <span>启用远程模型分析</span>
+              <span>启用外部推理模型</span>
             </label>
             <label class="field">
               <span>Provider</span>
@@ -51,7 +52,7 @@
               <span>API Key</span>
               <input id="apiKey" type="password" placeholder="仅在需要覆盖默认配置时填写" />
             </label>
-            <p id="configState" class="muted">尚未读取模型配置</p>
+            <p id="configState" class="muted">尚未读取模型配置。</p>
           </article>
 
           <article class="panel">
@@ -60,8 +61,8 @@
               <button id="loadSample" class="ghost small">加载样例</button>
             </div>
             <label class="field">
-              <span>想让系统解释什么结果</span>
-              <input id="expectedOutcome" placeholder="例如：为什么这起案件更像人为操纵而不是单纯意外？" />
+              <span>分析目标</span>
+              <input id="expectedOutcome" placeholder="例如：重建案件形成链条，并评估主要嫌疑对象。" />
             </label>
             <label class="field">
               <span>上传文件</span>
@@ -69,13 +70,13 @@
             </label>
             <label class="field">
               <span>或直接输入文本</span>
-              <textarea id="rawText" rows="14" placeholder="粘贴案情材料、时间线、证言、新闻或纪要"></textarea>
+              <textarea id="rawText" rows="14" placeholder="粘贴案情材料、证言、新闻、纪要或调查记录"></textarea>
             </label>
-            <button id="runWorkflow" class="primary">开始案情重演</button>
+            <button id="runWorkflow" class="primary">启动重演</button>
           </article>
 
           <article class="panel">
-            <h2>MiroFish 复用点</h2>
+            <h2>架构说明</h2>
             <ul id="designNotes" class="note-list"></ul>
           </article>
         </aside>
@@ -83,48 +84,48 @@
         <section class="workspace">
           <article class="panel wide">
             <div class="panel-head">
-              <h2>运行状态</h2>
-              <span id="statusText" class="status">等待输入</span>
+              <h2>分析流程</h2>
+              <span id="statusText" class="status">等待任务</span>
             </div>
-            <div id="pipelineRoot" class="pipeline empty">这里会按顺序展示解析、图谱、智能体和结果阶段。</div>
+            <div id="pipelineRoot" class="pipeline empty">任务启动后，这里会依次展示解析、图谱、智能体与结果阶段。</div>
           </article>
 
           <article class="panel wide">
             <div class="panel-head">
-              <h2>文档与图谱</h2>
+              <h2>材料概览与关系图谱</h2>
               <span id="modelBadge" class="badge">rules_only</span>
             </div>
-            <div id="documentRoot" class="document empty">还没有解析到文档。</div>
+            <div id="documentRoot" class="document empty">尚未载入材料。</div>
             <div class="graph-layout">
               <div id="graphCanvas" class="graph-shell empty">图谱尚未生成。</div>
-              <aside id="graphInspector" class="inspector empty">点击节点或连线后，这里会显示详细信息。</aside>
+              <aside id="graphInspector" class="inspector empty">点击节点或关系后，这里将显示详细属性与证据说明。</aside>
             </div>
           </article>
 
           <article class="panel wide">
             <div class="panel-head">
-              <h2>智能体过程</h2>
-              <span class="muted">Evidence / Relationship / Suspicion / Reconstruction / Judge</span>
+              <h2>智能体协作</h2>
+              <span class="muted">先渲染角色，再展示交互与结论收敛过程</span>
             </div>
             <div class="agent-layout">
-              <div id="agentRoot" class="grid-two empty">智能体卡片会逐步更新。</div>
-              <div id="agentDialogue" class="dialogue-feed empty">这里会动态展示智能体之间的交互过程。</div>
+              <div id="agentRoot" class="grid-two empty">智能体角色将在这里初始化。</div>
+              <div id="agentDialogue" class="dialogue-feed empty">智能体交互日志将在这里动态播放。</div>
             </div>
           </article>
 
           <article class="panel wide">
             <div class="panel-head">
-              <h2>最终结果</h2>
+              <h2>综合输出</h2>
               <span class="muted">案情解释 / 嫌疑人排序 / 重演时间线</span>
             </div>
-            <div id="resultRoot" class="result-grid empty">最终输出会显示在这里。</div>
+            <div id="resultRoot" class="result-grid empty">最终分析结果将在这里生成。</div>
           </article>
         </section>
       </section>
     </main>
 
-    <script src="https://unpkg.com/three/build/three.min.js"></script>
-    <script src="https://unpkg.com/3d-force-graph"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.76.0/dist/3d-force-graph.min.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

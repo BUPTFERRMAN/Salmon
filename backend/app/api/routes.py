@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api")
 
 @router.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "BackTrace Demo"}
+    return {"status": "ok", "service": "Salmon"}
 
 
 @router.get("/demos")
@@ -29,12 +29,12 @@ def design_notes() -> dict:
         "borrowed_from_mirofish": [
             "保留“文档解析 -> 图谱构建 -> 智能体推演 -> 综合裁决”的分层流程。",
             "复用图谱先行的思路，让用户先看到人物、事件、线索和关系结构。",
-            "参考工作台式双栏交互，把图谱、代理过程和结果同时放在一个前端页面里。",
+            "参考工作台式双栏交互，把图谱、智能体过程和结果统一放在一个页面里。",
         ],
         "rewritten_for_backtrace": [
-            "把面向未来的社会仿真改成面向过去的案情回溯。",
-            "把代理焦点改成 Evidence / Relationship / Suspicion / Reconstruction / Judge。",
-            "优先服务 PDF 或文本材料上传，适合案情重演、历史溯源和逻辑链修复。",
+            "将面向未来的社会仿真改为面向过去的案件回溯与因果重建。",
+            "将智能体职责改写为 Evidence / Relationship / Suspicion / Reconstruction / Judge。",
+            "优先服务 PDF 或文本材料上传，面向案情重演、历史溯源与叙事链条校验。",
         ],
     }
 

@@ -20,14 +20,57 @@ const els = {
   resultRoot: document.getElementById("resultRoot"),
 };
 
-let graphInstance = null;
+const AGENT_PERSONAS = [
+  {
+    agent_name: "Evidence Agent",
+    codename: "Trace Lens",
+    badge: "EV",
+    accent: "#b44d28",
+    role: "证据审计",
+    summary: "负责提取高风险线索、识别证据断点与异常模式。",
+  },
+  {
+    agent_name: "Relationship Agent",
+    codename: "Link Weaver",
+    badge: "RL",
+    accent: "#254d59",
+    role: "关系建模",
+    summary: "负责梳理人物关系、利益链条与隐性依附结构。",
+  },
+  {
+    agent_name: "Suspicion Agent",
+    codename: "Rank Signal",
+    badge: "SP",
+    accent: "#8b5e34",
+    role: "嫌疑排序",
+    summary: "基于动机、手段、机会与线索覆盖度输出排序。",
+  },
+  {
+    agent_name: "Reconstruction Agent",
+    codename: "Time Thread",
+    badge: "RC",
+    accent: "#3e6b6f",
+    role: "因果拼接",
+    summary: "负责回溯作案机制、重组事件链条与时间线。",
+  },
+  {
+    agent_name: "Judge Agent",
+    codename: "Final Frame",
+    badge: "JG",
+    accent: "#c59c3d",
+    role: "综合裁决",
+    summary: "负责整合多方观点，输出主解释与关键不确定性。",
+  },
+];
 
-const stepLabels = {
-  parse: { title: "材料解析", detail: "读取文件并抽出可分析文本。" },
-  graph: { title: "关系图谱", detail: "先展示人物、事件与线索结构。" },
-  reason: { title: "多智能体回溯", detail: "让多个角色交叉验证作案机制。" },
-  result: { title: "综合裁决", detail: "输出案情解释、嫌疑人排序和重演时间线。" },
+const STEP_LABELS = {
+  parse: { title: "材料解析", detail: "抽取可分析文本、基础事实与结构化片段。" },
+  graph: { title: "关系图谱", detail: "构建人物、事件与线索的可交互关系视图。" },
+  reason: { title: "多智能体推演", detail: "执行角色分工、证据交叉验证与回溯推演。" },
+  result: { title: "综合输出", detail: "生成案情解释、嫌疑人排序与证据化时间线。" },
 };
+
+let graphInstance = null;
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
@@ -43,35 +86,36 @@ function setStatus(text) {
 }
 
 function resetWorkspace() {
+  if (graphInstance && typeof graphInstance._destructor === "function") {
+    graphInstance._destructor();
+  }
+  graphInstance = null;
+
   els.pipelineRoot.className = "pipeline empty";
-  els.pipelineRoot.textContent = "这里会按顺序展示解析、图谱、智能体和结果阶段。";
+  els.pipelineRoot.textContent = "任务启动后，这里会依次展示解析、图谱、智能体与结果阶段。";
   els.documentRoot.className = "document empty";
-  els.documentRoot.textContent = "还没有解析到文档。";
+  els.documentRoot.textContent = "尚未载入材料。";
   els.graphCanvas.className = "graph-shell empty";
   els.graphCanvas.textContent = "图谱尚未生成。";
   els.graphInspector.className = "inspector empty";
-  els.graphInspector.textContent = "点击节点或连线后，这里会显示详细信息。";
+  els.graphInspector.textContent = "点击节点或关系后，这里将显示详细属性与证据说明。";
   els.agentRoot.className = "grid-two empty";
-  els.agentRoot.textContent = "智能体卡片会逐步更新。";
+  els.agentRoot.textContent = "智能体角色将在这里初始化。";
   els.agentDialogue.className = "dialogue-feed empty";
-  els.agentDialogue.textContent = "这里会动态展示智能体之间的交互过程。";
+  els.agentDialogue.textContent = "智能体交互日志将在这里动态播放。";
   els.resultRoot.className = "result-grid empty";
-  els.resultRoot.textContent = "最终输出会显示在这里。";
+  els.resultRoot.textContent = "最终分析结果将在这里生成。";
 }
 
-function pipelineText(step) {
-  const local = stepLabels[step.step_id] || {};
-  return {
-    title: local.title || step.title,
-    detail: local.detail || step.detail,
-  };
+function localizeStep(step) {
+  return STEP_LABELS[step.step_id] || { title: step.title, detail: step.detail };
 }
 
 function renderPipeline(steps) {
   els.pipelineRoot.className = "pipeline";
   els.pipelineRoot.innerHTML = steps
     .map((step) => {
-      const copy = pipelineText(step);
+      const copy = localizeStep(step);
       return `
         <article class="pipeline-step ${step.status}">
           <strong>${copy.title}</strong>
@@ -93,11 +137,11 @@ function renderDocument(document, evidenceItems, expectedOutcome) {
         <span class="pill">字符数：${document.character_count}</span>
         <span class="pill">页数：${document.page_count ?? "未统计"}</span>
       </div>
-      <p><strong>目标：</strong>${expectedOutcome}</p>
+      <p><strong>分析目标：</strong>${expectedOutcome}</p>
       <p>${document.extracted_preview}</p>
     </article>
     <article class="result-card">
-      <strong>高优先级线索</strong>
+      <strong>关键线索预览</strong>
       <ul>
         ${evidenceItems
           .slice(0, 5)
@@ -118,9 +162,9 @@ function renderInspector(kind, payload) {
       <article class="inspector-card">
         <h3>${payload.label}</h3>
         <p class="muted">${payload.node_type}</p>
-        <p>${payload.summary || "暂无摘要"}</p>
+        <p>${payload.summary || "暂无摘要。"}</p>
         <dl>
-          <div><dt>node_id</dt><dd>${payload.node_id}</dd></div>
+          <div><dt>node_id</dt><dd>${payload.node_id || payload.id}</dd></div>
           <div><dt>evidence_refs</dt><dd>${(payload.evidence_refs || []).join(", ") || "无"}</dd></div>
           ${attributes}
         </dl>
@@ -133,7 +177,7 @@ function renderInspector(kind, payload) {
     <article class="inspector-card">
       <h3>${payload.relation}</h3>
       <p class="muted">${payload.source} -> ${payload.target}</p>
-      <p>${payload.evidence || "暂无说明"}</p>
+      <p>${payload.evidence || "暂无说明。"}</p>
       <dl>
         <div><dt>strength</dt><dd>${payload.strength}</dd></div>
       </dl>
@@ -151,11 +195,11 @@ function renderGraph(nodes, edges) {
   els.graphCanvas.className = "graph-shell";
   els.graphCanvas.innerHTML = "";
   els.graphInspector.className = "inspector empty";
-  els.graphInspector.textContent = "点击节点或连线后，这里会显示详细信息。";
+  els.graphInspector.textContent = "点击节点或关系后，这里将显示详细属性与证据说明。";
 
   if (!nodes.length) {
     els.graphCanvas.classList.add("empty");
-    els.graphCanvas.textContent = "没有足够节点可用于生成图谱。";
+    els.graphCanvas.textContent = "当前材料尚未生成可视化图谱。";
     return;
   }
 
@@ -165,59 +209,75 @@ function renderGraph(nodes, edges) {
     return;
   }
 
+  if (graphInstance && typeof graphInstance._destructor === "function") {
+    graphInstance._destructor();
+  }
+
+  const width = Math.max(420, els.graphCanvas.clientWidth - 24);
+  const height = Math.max(440, els.graphCanvas.clientHeight - 24);
+
   const data = {
-    nodes: nodes.map((node) => ({ ...node, color: nodeColor(node), val: Math.max(4, (node.suspicion_score || 10) / 10) })),
+    nodes: nodes.map((node) => ({
+      ...node,
+      id: node.node_id,
+      color: nodeColor(node),
+      val: Math.max(6, (Number(node.suspicion_score) || 20) / 8),
+    })),
     links: edges.map((edge) => ({ ...edge })),
   };
 
   graphInstance = ForceGraph3D()(els.graphCanvas)
+    .width(width)
+    .height(height)
     .backgroundColor("rgba(255,255,255,0)")
+    .nodeId("id")
+    .linkSource("source")
+    .linkTarget("target")
+    .showNavInfo(false)
     .nodeLabel((node) => `${node.label}<br/>${node.node_type}`)
     .nodeColor((node) => node.color)
     .nodeVal((node) => node.val)
-    .linkColor(() => "rgba(29,26,24,0.18)")
-    .linkWidth((link) => 1 + Number(link.strength || 0.5))
-    .linkOpacity(0.65)
-    .cooldownTicks(120)
+    .nodeOpacity(0.92)
+    .linkColor(() => "rgba(29,26,24,0.22)")
+    .linkWidth((link) => 1.5 + Number(link.strength || 0.5))
+    .linkOpacity(0.72)
+    .linkDirectionalParticles(1)
+    .linkDirectionalParticleWidth(1.8)
+    .cooldownTicks(160)
     .graphData(data)
     .onNodeClick((node) => renderInspector("node", node))
-    .onLinkClick((link) => renderInspector("link", link));
-
-  setTimeout(() => {
-    graphInstance.zoomToFit(600, 60);
-  }, 500);
+    .onLinkClick((link) => renderInspector("link", link))
+    .onEngineStop(() => {
+      if (graphInstance) {
+        graphInstance.zoomToFit(400, 70);
+      }
+    });
 }
 
-function renderAgentCards(agents) {
+function renderAgentPersonas(mode = "idle", agents = []) {
+  const findingsByName = new Map(agents.map((agent) => [agent.agent_name, agent]));
   els.agentRoot.className = "grid-two";
-  els.agentRoot.innerHTML = agents
-    .map(
-      (agent) => `
-        <article class="agent-card">
-          <strong>${agent.agent_name}</strong>
-          <div class="muted">${agent.purpose}</div>
-          <p>置信度：${Math.round(agent.confidence * 100)}%</p>
-          <ul>${agent.findings.map((item) => `<li>${item}</li>`).join("")}</ul>
-        </article>
-      `
-    )
-    .join("");
-}
-
-function renderPendingAgents() {
-  const placeholders = ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent", "Judge Agent"];
-  els.agentRoot.className = "grid-two";
-  els.agentRoot.innerHTML = placeholders
-    .map(
-      (name) => `
-        <article class="agent-card">
-          <strong>${name}</strong>
-          <div class="muted">等待推演结果...</div>
-          <p>正在准备观点</p>
-        </article>
-      `
-    )
-    .join("");
+  els.agentRoot.innerHTML = AGENT_PERSONAS.map((persona) => {
+    const result = findingsByName.get(persona.agent_name);
+    const statusLabel = mode === "pending" ? "待机完成，等待推演" : result ? "已完成本轮分析" : "角色初始化";
+    const list = result
+      ? `<ul>${result.findings.map((item) => `<li>${item}</li>`).join("")}</ul>`
+      : `<p class="muted">${persona.summary}</p>`;
+    return `
+      <article class="agent-card persona-card ${result ? "active" : ""}" style="--agent-accent:${persona.accent}">
+        <div class="persona-head">
+          <div class="persona-badge">${persona.badge}</div>
+          <div>
+            <strong>${persona.codename}</strong>
+            <div class="muted">${persona.agent_name} / ${persona.role}</div>
+          </div>
+        </div>
+        <p class="persona-summary">${persona.summary}</p>
+        <div class="persona-state">${statusLabel}</div>
+        ${list}
+      </article>
+    `;
+  }).join("");
 }
 
 async function playDialogue(dialogue) {
@@ -234,7 +294,7 @@ async function playDialogue(dialogue) {
       <p>${item.message}</p>
     `;
     els.agentDialogue.appendChild(wrapper);
-    await new Promise((resolve) => setTimeout(resolve, 260));
+    await new Promise((resolve) => setTimeout(resolve, 280));
   }
 }
 
@@ -273,7 +333,7 @@ function renderResults(finalResult) {
     <article class="result-card">
       <h3>案情解释</h3>
       <p>${finalResult.case_explanation}</p>
-      <p><strong>裁决摘要：</strong>${finalResult.verdict_summary}</p>
+      <p><strong>综合结论：</strong>${finalResult.verdict_summary}</p>
     </article>
     <article class="result-card">
       <h3>证据说明</h3>
@@ -283,11 +343,11 @@ function renderResults(finalResult) {
     </article>
     <article class="result-card">
       <h3>嫌疑人排序</h3>
-      <div class="ranking-table">${rankingRows || "<p>暂无排序。</p>"}</div>
+      <div class="ranking-table">${rankingRows || "<p>暂无嫌疑人排序。</p>"}</div>
     </article>
     <article class="result-card">
       <h3>案情重演时间线</h3>
-      <div class="timeline-list">${timelineRows || "<p>暂无时间线。</p>"}</div>
+      <div class="timeline-list">${timelineRows || "<p>暂无可用时间线。</p>"}</div>
     </article>
   `;
 }
@@ -300,7 +360,7 @@ async function loadConfig() {
   els.modelEnabled.checked = Boolean(config.enabled);
   els.configState.textContent = config.has_api_key
     ? `已读取模型配置，Key: ${config.api_key_hint || "已保存"}`
-    : "当前没有 API Key，将自动走规则引擎。";
+    : "当前未保存 API Key，将自动回退到规则引擎。";
 }
 
 async function saveConfig() {
@@ -317,19 +377,22 @@ async function saveConfig() {
     body: JSON.stringify(payload),
   });
   els.apiKey.value = "";
-  els.configState.textContent = payload.enabled ? "模型配置已保存，后续会优先调用远程模型。" : "模型配置已保存，但当前处于关闭状态。";
+  els.configState.textContent = payload.enabled
+    ? "模型配置已保存，后续任务将优先调用外部模型。"
+    : "模型配置已保存，当前处于关闭状态。";
 }
 
 async function loadSample() {
   const sample = await fetchJson("/api/case-sample");
   els.rawText.value = sample.seed_text;
   els.expectedOutcome.value = sample.expected_outcome;
-  setStatus(`已加载样例：${sample.title}`);
+  setStatus(`样例已载入：${sample.title}`);
 }
 
 async function runWorkflow() {
   resetWorkspace();
-  setStatus("正在解析材料...");
+  renderAgentPersonas("pending");
+  setStatus("材料解析中");
   els.modelBadge.textContent = "parsing";
 
   const formData = new FormData();
@@ -341,12 +404,16 @@ async function runWorkflow() {
   }
 
   try {
-    const parseData = await fetchJson("/api/case-parse", { method: "POST", body: formData });
+    const parseData = await fetchJson("/api/case-parse", {
+      method: "POST",
+      body: formData,
+    });
+
     renderPipeline(parseData.pipeline);
     renderDocument(parseData.document, parseData.evidence_items, parseData.expected_outcome);
     renderGraph(parseData.graph_nodes, parseData.graph_edges);
-    renderPendingAgents();
-    setStatus("图谱已生成，正在执行多智能体回溯...");
+    renderAgentPersonas("pending");
+    setStatus("关系图谱已完成，正在执行多智能体推演");
     els.modelBadge.textContent = "reasoning";
 
     const reasonData = await fetchJson("/api/case-reason", {
@@ -361,13 +428,13 @@ async function runWorkflow() {
 
     els.modelBadge.textContent = reasonData.model_status;
     renderPipeline(reasonData.pipeline);
-    renderAgentCards(reasonData.agents);
+    renderAgentPersonas("done", reasonData.agents);
     renderResults(reasonData.final_result);
-    setStatus("智能体回溯完成，正在展示交互过程...");
+    setStatus("多智能体交互回放中");
     await playDialogue(reasonData.agent_dialogue || []);
-    setStatus("案情重演完成");
+    setStatus("分析完成");
   } catch (error) {
-    setStatus("运行失败");
+    setStatus("任务失败");
     els.pipelineRoot.className = "pipeline";
     els.pipelineRoot.innerHTML = `<article class="pipeline-step fallback"><strong>错误</strong><p>${String(error.message).slice(0, 500)}</p></article>`;
   }
@@ -379,6 +446,7 @@ async function bootstrap() {
     .map((item) => `<li>${item}</li>`)
     .join("");
   await loadConfig();
+  renderAgentPersonas("idle");
 }
 
 document.getElementById("saveConfig").addEventListener("click", saveConfig);
