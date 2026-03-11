@@ -54,10 +54,11 @@ The end goal is replayability: reconstructing how a situation evolved from early
   - `Suspicion Agent`
   - `Reconstruction Agent`
   - `Judge Agent`
-- Output:
-  - case explanation
-  - suspect ranking
-  - reenactment timeline with evidence references
+- Goal-conditioned output (not fixed templates):
+  - reconstructed causal paths and key turning points
+  - competing hypotheses with evidence and counter-evidence
+  - uncertainty and confidence annotations
+  - user-requested report structure (for example: narrative replay, role analysis, timeline, or gap checklist)
 
 ## Model Access
 
