@@ -64,6 +64,11 @@
               <input id="expectedOutcome" placeholder="例如：重建形成链条、识别关键对象、解释情绪升级、定位舆情归因" />
             </label>
             <label class="field">
+              <span>协作轮数</span>
+              <input id="collaborationRounds" type="number" min="1" max="6" step="1" value="2" />
+              <small class="muted">可调少两轮或多两轮，最后一轮会自动加入综合裁决智能体。</small>
+            </label>
+            <label class="field">
               <span>上传文件</span>
               <input id="fileInput" type="file" accept=".pdf,.txt,.md,.markdown" />
             </label>

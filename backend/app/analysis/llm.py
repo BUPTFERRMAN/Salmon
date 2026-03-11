@@ -22,6 +22,7 @@ def _default_config() -> ModelConfig:
         model="deepseek-reasoner",
         api_key=api_key,
         enabled=bool(api_key),
+        request_timeout_seconds=None,
     )
 
 
@@ -54,6 +55,8 @@ def _hydrate_deepseek_defaults(config: ModelConfig) -> ModelConfig:
     if config.api_key and not config.enabled:
         config.enabled = True
         changed = True
+    if getattr(config, "request_timeout_seconds", None) is None:
+        config.request_timeout_seconds = None
     if changed:
         save_model_config(config)
     return config
@@ -93,6 +96,7 @@ def model_config_view(payload: Optional[ModelConfig] = None) -> ModelConfigView:
         enabled=config.enabled,
         has_api_key=bool(config.api_key),
         api_key_hint=key_hint,
+        request_timeout_seconds=config.request_timeout_seconds,
     )
 
 
@@ -109,9 +113,16 @@ class OpenAICompatibleClient:
             and self.config.model.strip()
         )
 
-    def complete_json(self, system_prompt: str, user_prompt: str, timeout: int = 60) -> Optional[Dict[str, Any]]:
+    def complete_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        timeout: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
         if not self.enabled:
             return None
+
+        effective_timeout = self.config.request_timeout_seconds if timeout is None else timeout
 
         payload = {
             "model": self.config.model,
@@ -134,7 +145,11 @@ class OpenAICompatibleClient:
             },
         )
         try:
-            with request.urlopen(req, timeout=timeout) as response:
+            if effective_timeout is None or effective_timeout <= 0:
+                response = request.urlopen(req)
+            else:
+                response = request.urlopen(req, timeout=effective_timeout)
+            with response:
                 body = json.loads(response.read().decode("utf-8"))
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return None

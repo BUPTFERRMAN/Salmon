@@ -102,6 +102,7 @@ class ModelConfig(BaseModel):
     model: str = ""
     api_key: str = ""
     enabled: bool = False
+    request_timeout_seconds: Optional[float] = None
 
 
 class ModelConfigView(BaseModel):
@@ -111,6 +112,7 @@ class ModelConfigView(BaseModel):
     enabled: bool = False
     has_api_key: bool = False
     api_key_hint: str = ""
+    request_timeout_seconds: Optional[float] = None
 
 
 class UploadedDocument(BaseModel):
@@ -217,6 +219,16 @@ class ReconstructionStep(BaseModel):
     inference_level: str
 
 
+class OutputPanel(BaseModel):
+    panel_id: str
+    title: str
+    panel_type: str
+    summary: str
+    body: str
+    items: List[str] = Field(default_factory=list)
+    evidence_refs: List[str] = Field(default_factory=list)
+
+
 class CaseFinalResult(BaseModel):
     case_explanation: str
     verdict_summary: str
@@ -224,12 +236,15 @@ class CaseFinalResult(BaseModel):
     reenactment_timeline: List[ReconstructionStep]
     evidence_notes: List[str]
     uncertainties: List[str]
+    goal_response: str = ""
+    output_panels: List[OutputPanel] = Field(default_factory=list)
 
 
 class CaseParseResponse(BaseModel):
     mode: str = "case_parse"
     document: UploadedDocument
     expected_outcome: str
+    collaboration_rounds: int = 2
     detected_language: str
     extracted_text: str
     structured_case: Dict[str, Any] = Field(default_factory=dict)
@@ -290,6 +305,7 @@ class CaseSynthesisResponse(BaseModel):
 class CaseReasonResponse(BaseModel):
     mode: str = "case_reasoning"
     expected_outcome: str
+    collaboration_rounds: int = 2
     detected_language: str
     model_status: str
     pipeline: List[PipelineStep]
@@ -303,6 +319,7 @@ class CaseWorkflowResponse(BaseModel):
     mode: str = "case_reenactment"
     document: UploadedDocument
     expected_outcome: str
+    collaboration_rounds: int = 2
     detected_language: str
     model_status: str
     graph_nodes: List[GraphNode]
@@ -313,3 +330,25 @@ class CaseWorkflowResponse(BaseModel):
     agents: List[AgentStep]
     agent_dialogue: List[AgentExchange]
     final_result: CaseFinalResult
+
+
+class CaseSessionResponse(BaseModel):
+    mode: str = "case_session"
+    session_id: str
+    status: str
+    status_text: str
+    expected_outcome: str
+    collaboration_rounds: int = 2
+    document: UploadedDocument
+    extracted_text: str
+    detected_language: Optional[str] = None
+    model_status: str = "preparing"
+    pipeline: List[PipelineStep] = Field(default_factory=list)
+    graph_nodes: List[GraphNode] = Field(default_factory=list)
+    graph_edges: List[GraphEdge] = Field(default_factory=list)
+    evidence_items: List[EvidenceItem] = Field(default_factory=list)
+    agent_profiles: List[AgentProfile] = Field(default_factory=list)
+    agents: List[AgentStep] = Field(default_factory=list)
+    agent_dialogue: List[AgentExchange] = Field(default_factory=list)
+    final_result: Optional[CaseFinalResult] = None
+    error: Optional[str] = None

@@ -1,4 +1,4 @@
-const els = {
+﻿const els = {
   providerName: document.getElementById("providerName"),
   baseUrl: document.getElementById("baseUrl"),
   modelName: document.getElementById("modelName"),
@@ -6,6 +6,7 @@ const els = {
   modelEnabled: document.getElementById("modelEnabled"),
   configState: document.getElementById("configState"),
   expectedOutcome: document.getElementById("expectedOutcome"),
+  collaborationRounds: document.getElementById("collaborationRounds"),
   rawText: document.getElementById("rawText"),
   fileInput: document.getElementById("fileInput"),
   statusText: document.getElementById("statusText"),
@@ -22,35 +23,23 @@ const els = {
 
 const COPY = {
   pipeline: {
-    parse: { title: "材料解析", detail: "抽取原始文本、结构化片段与初步证据引用。" },
-    graph: { title: "关系图谱", detail: "构建人物、事件、线索及其关联关系。" },
-    reason: { title: "多智能体协作", detail: "按轮次执行代理推演，逐步展示交叉校验过程。" },
-    result: { title: "综合输出", detail: "整合代理结论，形成最终解释、排序与回溯时间线。" },
+    parse: { title: "文档解析", detail: "抽取原始文本、结构化片段和候选证据。" },
+    graph: { title: "关系图谱", detail: "构建人物、事件、线索及其证据关系。" },
+    reason: { title: "多智能体协作", detail: "按轮次执行代理推演，并持续展示交互过程。" },
+    result: { title: "综合输出", detail: "围绕分析目标生成可追溯的结果面板。" },
   },
-  collaborationPlan: [
-    {
-      roundIndex: 1,
-      label: "Round 1 · 初步建模",
-      agents: ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent"],
-    },
-    {
-      roundIndex: 2,
-      label: "Round 2 · 交叉校验",
-      agents: ["Evidence Agent", "Relationship Agent", "Suspicion Agent", "Reconstruction Agent", "Judge Agent"],
-    },
-  ],
   empty: {
-    pipeline: "任务启动后，这里会依次展示解析、图谱、代理协作与综合输出。",
+    pipeline: "任务启动后，这里会持续展示解析、图谱、代理协作和综合输出阶段。",
     document: "尚未载入材料。",
     graph: "图谱尚未生成。",
-    agents: "图谱构建完成后将初始化代理角色。",
-    dialogue: "多轮代理日志会逐步出现在这里。",
+    agents: "图谱准备完成后，这里会初始化多智能体角色。",
+    dialogue: "多轮代理日志会随推理逐步出现。",
     results: "最终分析结果将在这里生成。",
   },
   graph: {
     defaultInspectorTitle: "图谱检查器",
-    defaultInspectorBody: "点击节点、关系或证据引用后，这里会展示结构属性、证据摘录和关联对象。点击图谱空白处可恢复到初始高亮状态。",
-    noEvidence: "暂无细粒度证据引用。",
+    defaultInspectorBody: "点击节点、关系、证据引用或关联节点后，这里会显示详细属性、证据摘录与高亮联动。点击图谱空白处可恢复全图视图。",
+    noEvidence: "暂无更细粒度的证据引用。",
     noRelatedNodes: "暂无关联节点。",
     noHitNodes: "没有直接命中的节点。",
     noHitLinks: "没有直接命中的关系。",
@@ -60,16 +49,30 @@ const COPY = {
 const state = {
   graphInstance: null,
   graphData: { nodes: [], links: [] },
+  graphSignature: "",
+  sessionId: null,
+  pollToken: 0,
+  pollTimer: null,
   parseData: null,
   agentSteps: [],
   dialogueItems: [],
+  renderedRounds: new Set(),
+  finalRendered: false,
   selectedNodeId: null,
   selectedLinkKey: null,
   selectedEvidenceRef: null,
+  theme: "sky",
+};
+
+const THEME_ORDER = ["sky", "warm", "dark"];
+const THEME_LABELS = {
+  sky: "蓝白",
+  warm: "暖色",
+  dark: "夜间",
 };
 
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function escapeHtml(value) {
@@ -79,6 +82,10 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function escapeHtmlWithBreaks(value) {
+  return escapeHtml(value).replace(/\n/g, "<br />");
 }
 
 async function fetchJson(url, options = {}) {
@@ -92,6 +99,13 @@ async function fetchJson(url, options = {}) {
 
 function setStatus(text) {
   els.statusText.textContent = text;
+}
+
+function clearPolling() {
+  if (state.pollTimer) {
+    window.clearTimeout(state.pollTimer);
+    state.pollTimer = null;
+  }
 }
 
 function renderGraphInspectorDefault() {
@@ -108,6 +122,36 @@ function renderGraphInspectorDefault() {
   `;
 }
 
+function hasGraphSelection() {
+  return Boolean(state.selectedNodeId || state.selectedLinkKey || state.selectedEvidenceRef);
+}
+
+function restoreGraphSelection() {
+  if (state.selectedNodeId) {
+    const node = state.graphData.nodes.find((item) => item.id === state.selectedNodeId || item.node_id === state.selectedNodeId);
+    if (node) {
+      renderInspector("node", node);
+      applyGraphHighlight();
+      return true;
+    }
+  }
+  if (state.selectedLinkKey) {
+    const link = state.graphData.links.find((item) => item.key === state.selectedLinkKey);
+    if (link) {
+      renderInspector("link", link);
+      applyGraphHighlight();
+      return true;
+    }
+  }
+  if (state.selectedEvidenceRef) {
+    renderEvidenceInspector(state.selectedEvidenceRef);
+    applyGraphHighlight();
+    return true;
+  }
+  clearGraphSelection();
+  return false;
+}
+
 function clearGraphSelection() {
   state.selectedNodeId = null;
   state.selectedLinkKey = null;
@@ -117,14 +161,20 @@ function clearGraphSelection() {
 }
 
 function resetWorkspace() {
+  clearPolling();
   if (state.graphInstance && typeof state.graphInstance._destructor === "function") {
     state.graphInstance._destructor();
   }
   state.graphInstance = null;
   state.graphData = { nodes: [], links: [] };
+  state.graphSignature = "";
+  state.sessionId = null;
+  state.pollToken += 1;
   state.parseData = null;
   state.agentSteps = [];
   state.dialogueItems = [];
+  state.renderedRounds = new Set();
+  state.finalRendered = false;
   state.selectedNodeId = null;
   state.selectedLinkKey = null;
   state.selectedEvidenceRef = null;
@@ -143,15 +193,21 @@ function resetWorkspace() {
   els.agentDialogue.textContent = COPY.empty.dialogue;
   els.resultRoot.className = "result-grid empty";
   els.resultRoot.textContent = COPY.empty.results;
+  els.modelBadge.textContent = "idle";
 }
 
-function renderPipeline(steps) {
+function renderPipeline(steps = []) {
+  if (!steps.length) {
+    els.pipelineRoot.className = "pipeline empty";
+    els.pipelineRoot.textContent = COPY.empty.pipeline;
+    return;
+  }
   els.pipelineRoot.className = "pipeline";
   els.pipelineRoot.innerHTML = steps
     .map((step) => {
       const copy = COPY.pipeline[step.step_id] || { title: step.title || step.step_id, detail: step.detail || "" };
       return `
-        <article class="pipeline-step ${step.status}">
+        <article class="pipeline-step ${escapeHtml(step.status)}" data-status="${escapeHtml(step.status)}">
           <strong>${escapeHtml(copy.title)}</strong>
           <div class="muted">${escapeHtml(step.status)}</div>
           <p>${escapeHtml(copy.detail)}</p>
@@ -161,40 +217,32 @@ function renderPipeline(steps) {
     .join("");
 }
 
-function updatePipeline(reasonStatus, resultStatus) {
-  renderPipeline([
-    { step_id: "parse", status: "completed" },
-    { step_id: "graph", status: "completed" },
-    { step_id: "reason", status: reasonStatus },
-    { step_id: "result", status: resultStatus },
-  ]);
-}
-
-function renderDocument(document, evidenceItems, expectedOutcome, fullText) {
-  const materialText = escapeHtml(fullText || document.extracted_preview || "");
+function renderDocument(document, evidenceItems = [], expectedOutcome = "", fullText = "") {
+  const preview = document?.extracted_preview || "暂无摘要";
+  const materialText = fullText || preview;
   els.documentRoot.className = "document";
   els.documentRoot.innerHTML = `
     <article class="result-card document-card">
       <div class="card-head">
-        <strong>${escapeHtml(document.source_name)}</strong>
+        <strong>${escapeHtml(document?.source_name || "未命名材料")}</strong>
         <div class="pill-row">
-          <span class="pill">类型：${escapeHtml(document.source_type)}</span>
-          <span class="pill">字符数：${escapeHtml(document.character_count)}</span>
-          <span class="pill">页数：${escapeHtml(document.page_count ?? "未统计")}</span>
+          <span class="pill">类型 ${escapeHtml(document?.source_type || "text")}</span>
+          <span class="pill">字符数 ${escapeHtml(document?.character_count || 0)}</span>
+          <span class="pill">页数 ${escapeHtml(document?.page_count ?? "未统计")}</span>
         </div>
       </div>
       <div class="scroll-pane">
-        <p><strong>分析目标：</strong>${escapeHtml(expectedOutcome)}</p>
+        <p><strong>分析目标：</strong>${escapeHtml(expectedOutcome || "未填写")}</p>
         <p><strong>上传内容摘要：</strong></p>
-        <p>${escapeHtml(document.extracted_preview || "暂无摘要")}</p>
+        <p class="rich-text">${escapeHtmlWithBreaks(preview)}</p>
       </div>
     </article>
-    <article class="result-card document-card document-wide">
+    <article class="result-card document-card">
       <div class="card-head">
         <strong>完整材料</strong>
         <span class="muted">滚动查看全文</span>
       </div>
-      <pre class="scroll-pane material-text">${materialText}</pre>
+      <pre class="scroll-pane material-text">${escapeHtml(materialText)}</pre>
     </article>
     <article class="result-card document-card">
       <div class="card-head">
@@ -202,18 +250,24 @@ function renderDocument(document, evidenceItems, expectedOutcome, fullText) {
         <span class="muted">点击后联动图谱高亮</span>
       </div>
       <div class="scroll-pane evidence-list">
-        ${evidenceItems
-          .slice(0, 18)
-          .map(
-            (item) => `
-              <button class="evidence-chip" data-ref-id="${escapeHtml(item.evidence_id)}">
-                <strong>${escapeHtml(item.label)}</strong>
-                <span>${escapeHtml(item.evidence_id)} / 风险 ${escapeHtml(item.risk_score)}</span>
-              </button>
-              <p class="evidence-excerpt">${escapeHtml(item.detail)}</p>
-            `,
-          )
-          .join("")}
+        ${
+          evidenceItems.length
+            ? evidenceItems
+                .slice(0, 18)
+                .map(
+                  (item) => `
+                    <div>
+                      <button class="evidence-chip" data-ref-id="${escapeHtml(item.evidence_id)}">
+                        <strong>${escapeHtml(item.label)}</strong>
+                        <span>${escapeHtml(item.evidence_id)} / 风险 ${escapeHtml(item.risk_score)}</span>
+                      </button>
+                      <p class="evidence-excerpt">${escapeHtml(item.detail)}</p>
+                    </div>
+                  `,
+                )
+                .join("")
+            : '<p class="muted">等待结构化分析完成后展示证据预览。</p>'
+        }
       </div>
     </article>
   `;
@@ -232,19 +286,18 @@ function linkKey(link) {
 }
 
 function normalizeGraph(nodes, edges) {
-  const normalizedNodes = nodes.map((node) => ({
+  const normalizedNodes = (nodes || []).map((node) => ({
     ...node,
     id: node.node_id,
     color: nodeColor(node),
-    val: Math.max(8, (Number(node.suspicion_score) || 18) / 7),
+    val: Math.max(12, (Number(node.suspicion_score) || 24) / 5.2),
   }));
   const ids = new Set(normalizedNodes.map((node) => node.id));
-  const normalizedLinks = edges
+  const normalizedLinks = (edges || [])
     .filter((edge) => ids.has(edge.source) && ids.has(edge.target))
     .map((edge) => ({ ...edge, key: linkKey(edge) }));
   return { nodes: normalizedNodes, links: normalizedLinks };
 }
-
 function refsOf(item) {
   const refs = new Set(item.evidence_refs || []);
   for (const detail of item.evidence_details || []) {
@@ -296,20 +349,17 @@ function applyGraphHighlight() {
   state.graphInstance
     .nodeColor((node) => {
       if (selectedEvidenceRef) {
-        if (evidenceNodeIds.has(node.id)) return node.color;
-        return "rgba(160, 160, 160, 0.18)";
+        return evidenceNodeIds.has(node.id) ? node.color : "rgba(160,160,160,0.18)";
       }
       if (selectedNodeId) {
         if (node.id === selectedNodeId) return "#111111";
-        if (neighbors.get(selectedNodeId)?.has(node.id)) return node.color;
-        return "rgba(160, 160, 160, 0.22)";
+        return neighbors.get(selectedNodeId)?.has(node.id) ? node.color : "rgba(160,160,160,0.22)";
       }
       if (selectedLinkKey) {
         const activeLink = state.graphData.links.find((item) => item.key === selectedLinkKey);
         const source = typeof activeLink?.source === "object" ? activeLink.source.id : activeLink?.source;
         const target = typeof activeLink?.target === "object" ? activeLink.target.id : activeLink?.target;
-        if (node.id === source || node.id === target) return node.color;
-        return "rgba(160, 160, 160, 0.22)";
+        return node.id === source || node.id === target ? node.color : "rgba(160,160,160,0.22)";
       }
       return node.color;
     })
@@ -329,23 +379,23 @@ function applyGraphHighlight() {
     })
     .linkWidth((link) => {
       if (selectedEvidenceRef) {
-        return linkMatchesEvidence(link, selectedEvidenceRef) ? 4.5 : 1;
+        return linkMatchesEvidence(link, selectedEvidenceRef) ? 6.4 : 1.6;
       }
       if (selectedLinkKey) {
-        return link.key === selectedLinkKey ? 5 : 1.5 + Number(link.strength || 0.5);
+        return link.key === selectedLinkKey ? 7 : 2.2 + Number(link.strength || 0.5) * 1.1;
       }
       if (selectedNodeId) {
         const source = typeof link.source === "object" ? link.source.id : link.source;
         const target = typeof link.target === "object" ? link.target.id : link.target;
-        return source === selectedNodeId || target === selectedNodeId ? 3.2 : 1.2;
+        return source === selectedNodeId || target === selectedNodeId ? 4.8 : 1.8;
       }
-      return 1.5 + Number(link.strength || 0.5);
+      return 2.2 + Number(link.strength || 0.5) * 1.1;
     })
     .nodeVal((node) => {
       if (selectedEvidenceRef) {
-        return evidenceNodeIds.has(node.id) ? node.val * 1.35 : Math.max(5, node.val * 0.8);
+        return evidenceNodeIds.has(node.id) ? node.val * 1.42 : Math.max(8, node.val * 0.86);
       }
-      if (selectedNodeId && node.id === selectedNodeId) return node.val * 1.45;
+      if (selectedNodeId && node.id === selectedNodeId) return node.val * 1.55;
       return node.val;
     });
 }
@@ -357,11 +407,13 @@ function renderEvidenceDetails(details = []) {
       ${details
         .map(
           (detail) => `
-            <button class="evidence-chip" data-ref-id="${escapeHtml(detail.ref_id)}">
-              <strong>${escapeHtml(detail.ref_id)}</strong>
-              <span>${escapeHtml(detail.note || detail.source)}</span>
-            </button>
-            <p class="evidence-excerpt">${escapeHtml(detail.excerpt)}</p>
+            <div>
+              <button class="evidence-chip" data-ref-id="${escapeHtml(detail.ref_id)}">
+                <strong>${escapeHtml(detail.ref_id)}</strong>
+                <span>${escapeHtml(detail.note || detail.source)}</span>
+              </button>
+              <p class="evidence-excerpt">${escapeHtml(detail.excerpt)}</p>
+            </div>
           `,
         )
         .join("")}
@@ -382,7 +434,7 @@ function renderEvidenceInspector(refId) {
   els.graphInspector.innerHTML = `
     <article class="inspector-card">
       <h3>证据 ${escapeHtml(refId)}</h3>
-      <p class="muted">已同步高亮相关节点与边。点击图谱空白处可恢复默认视图。</p>
+      <p class="muted">已同步高亮相关节点和关系。点击图谱空白处可恢复默认视图。</p>
       <div class="chips">
         <span class="pill">节点 ${context.nodes.length}</span>
         <span class="pill">关系 ${context.links.length}</span>
@@ -487,31 +539,47 @@ function selectEvidenceRef(refId) {
   renderEvidenceInspector(refId);
   applyGraphHighlight();
 }
+function renderGraph(nodes = [], edges = []) {
+  const normalized = normalizeGraph(nodes, edges);
+  const signature = JSON.stringify({
+    nodes: normalized.nodes.map((node) => node.id),
+    links: normalized.links.map((link) => link.key),
+  });
+  state.graphData = normalized;
 
-function renderGraph(nodes, edges) {
+  if (!normalized.nodes.length) {
+    els.graphCanvas.className = "graph-shell empty";
+    els.graphCanvas.textContent = COPY.empty.graph;
+    clearGraphSelection();
+    renderGraphInspectorDefault();
+    return;
+  }
+
+  if (signature === state.graphSignature && state.graphInstance) {
+    if (!restoreGraphSelection()) {
+      renderGraphInspectorDefault();
+      applyGraphHighlight();
+    }
+    return;
+  }
+
+  state.graphSignature = signature;
   els.graphCanvas.className = "graph-shell";
   els.graphCanvas.innerHTML = "";
 
-  if (!nodes.length) {
-    els.graphCanvas.classList.add("empty");
-    els.graphCanvas.textContent = "当前材料尚未生成可视化图谱。";
-    els.graphInspector.className = "inspector empty";
-    els.graphInspector.textContent = COPY.graph.defaultInspectorBody;
-    return;
-  }
-
   if (typeof ForceGraph3D !== "function") {
-    els.graphCanvas.classList.add("empty");
+    els.graphCanvas.className = "graph-shell empty";
     els.graphCanvas.textContent = "3D 图谱组件加载失败。";
-    els.graphInspector.className = "inspector empty";
-    els.graphInspector.textContent = COPY.graph.defaultInspectorBody;
+    renderGraphInspectorDefault();
     return;
   }
 
-  state.graphData = normalizeGraph(nodes, edges);
+  if (state.graphInstance && typeof state.graphInstance._destructor === "function") {
+    state.graphInstance._destructor();
+  }
+
   const width = Math.max(480, els.graphCanvas.clientWidth - 24);
   const height = Math.max(560, els.graphCanvas.clientHeight - 24);
-
   state.graphInstance = ForceGraph3D()(els.graphCanvas)
     .width(width)
     .height(height)
@@ -524,10 +592,10 @@ function renderGraph(nodes, edges) {
     .nodeVal((node) => node.val)
     .nodeLabel((node) => `${escapeHtml(node.label)}<br />${escapeHtml(node.node_type)}`)
     .linkColor(() => "rgba(29,26,24,0.2)")
-    .linkWidth((link) => 1.5 + Number(link.strength || 0.5))
+    .linkWidth((link) => 2.2 + Number(link.strength || 0.5) * 1.1)
     .linkOpacity(0.72)
     .linkDirectionalParticles(1)
-    .linkDirectionalParticleWidth(2)
+    .linkDirectionalParticleWidth(2.8)
     .d3AlphaDecay(0.02)
     .cooldownTicks(180)
     .graphData(state.graphData)
@@ -536,8 +604,10 @@ function renderGraph(nodes, edges) {
     .onBackgroundClick(() => clearGraphSelection())
     .onEngineStop(() => state.graphInstance && state.graphInstance.zoomToFit(500, 60));
 
-  renderGraphInspectorDefault();
-  applyGraphHighlight();
+  if (!restoreGraphSelection()) {
+    renderGraphInspectorDefault();
+    applyGraphHighlight();
+  }
 }
 
 function ensureAgentCard(profile) {
@@ -549,16 +619,15 @@ function ensureAgentCard(profile) {
   card.style.setProperty("--agent-accent", profile.accent);
   card.innerHTML = `
     <div class="persona-head">
-      <div class="persona-badge">${escapeHtml(profile.codename.slice(0, 2).toUpperCase())}</div>
+      <div class="persona-badge">${escapeHtml((profile.codename || profile.agent_name).slice(0, 2).toUpperCase())}</div>
       <div>
         <strong>${escapeHtml(profile.codename)}</strong>
         <div class="muted">${escapeHtml(profile.agent_name)} / ${escapeHtml(profile.role)}</div>
       </div>
     </div>
     <div class="persona-body">
-      <p class="persona-summary">${escapeHtml(profile.current_focus)}</p>
-      <div class="persona-state">${escapeHtml(profile.disposition)}</div>
-      <p class="muted">${escapeHtml(profile.persistent_state)}</p>
+      <p class="persona-summary">${escapeHtml(profile.current_focus || "")}</p>
+      <div class="persona-state">${escapeHtml(profile.disposition || "")}</div>
       <div class="memory-scroll">
         <ul class="memory-list">${(profile.memory_notes || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
       </div>
@@ -570,8 +639,11 @@ function ensureAgentCard(profile) {
 }
 
 function renderAgentProfiles(profiles = []) {
-  els.agentRoot.className = "grid-two";
-  els.agentRoot.innerHTML = "";
+  if (!profiles.length) return;
+  if (els.agentRoot.classList.contains("empty")) {
+    els.agentRoot.className = "grid-two";
+    els.agentRoot.innerHTML = "";
+  }
   profiles.forEach((profile) => ensureAgentCard(profile));
 }
 
@@ -588,11 +660,11 @@ function renderAgentTurn(turn) {
   block.className = "agent-round-block";
   block.innerHTML = `
     <div class="findings-title">Round ${escapeHtml(turn.round_index)}</div>
-    <ul>${turn.agent_step.findings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    <ul>${(turn.agent_step.findings || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
     <div class="chips">${(turn.agent_step.focus_refs || [])
       .map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`)
       .join("")}</div>
-    <div class="muted">confidence: ${escapeHtml(turn.agent_step.confidence.toFixed(2))}</div>
+    <div class="muted">confidence: ${escapeHtml(Number(turn.agent_step.confidence || 0).toFixed(2))}</div>
   `;
   roundsRoot.appendChild(block);
   roundsRoot.scrollTop = roundsRoot.scrollHeight;
@@ -610,6 +682,7 @@ function appendSystemDialogue(label, roundIndex) {
     <p>${escapeHtml(label)}</p>
   `;
   els.agentDialogue.appendChild(node);
+  els.agentDialogue.scrollTop = els.agentDialogue.scrollHeight;
 }
 
 async function playDialogueItems(dialogue = []) {
@@ -629,70 +702,85 @@ async function playDialogueItems(dialogue = []) {
     `;
     els.agentDialogue.appendChild(node);
     els.agentDialogue.scrollTop = els.agentDialogue.scrollHeight;
-    await sleep(220);
+    await sleep(140);
   }
 }
 
-function renderResults(finalResult) {
-  const rankingRows = finalResult.suspect_rankings
-    .map(
-      (item, index) => `
-        <article class="ranking-row">
-          <div class="ranking-score">#${index + 1}</div>
-          <strong>${escapeHtml(item.name)}</strong>
-          <div class="muted">${escapeHtml(item.role)}</div>
-          <p><strong>动机或驱动：</strong>${escapeHtml(item.motive)}</p>
-          <p><strong>手段或路径：</strong>${escapeHtml(item.means)}</p>
-          <p><strong>机会或触发点：</strong>${escapeHtml(item.opportunity)}</p>
-          <ul>${(item.supporting_evidence || []).map((evidence) => `<li>${escapeHtml(evidence)}</li>`).join("")}</ul>
-        </article>
-      `,
-    )
-    .join("");
-
-  const timelineRows = finalResult.reenactment_timeline
-    .map(
-      (item) => `
-        <article class="timeline-row">
-          <strong>${escapeHtml(item.order)}. ${escapeHtml(item.phase)}</strong>
-          <div class="muted">${escapeHtml(item.time_hint)} / ${escapeHtml(item.inference_level)}</div>
-          <p>${escapeHtml(item.event)}</p>
-          <div class="chips">${(item.evidence_refs || [])
-            .map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`)
-            .join("")}</div>
-        </article>
-      `,
-    )
-    .join("");
-
-  els.resultRoot.className = "result-grid";
-  els.resultRoot.innerHTML = `
-    <article class="result-card result-scroll-card">
-      <div class="card-head"><h3>分析解释</h3><span class="muted">主解释与综合判断</span></div>
-      <div class="scroll-pane">
-        <p>${escapeHtml(finalResult.case_explanation)}</p>
-        <p><strong>综合结论：</strong>${escapeHtml(finalResult.verdict_summary)}</p>
-      </div>
-    </article>
-    <article class="result-card result-scroll-card">
-      <div class="card-head"><h3>证据与不确定性</h3><span class="muted">滚动查看</span></div>
-      <div class="scroll-pane">
-        <ul>${(finalResult.evidence_notes || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        <h3>未决问题</h3>
-        <ul>${(finalResult.uncertainties || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-      </div>
-    </article>
-    <article class="result-card result-scroll-card">
-      <div class="card-head"><h3>关键对象排序</h3><span class="muted">支持滚动</span></div>
-      <div class="scroll-pane ranking-table">${rankingRows || "<p>暂无可用排序。</p>"}</div>
-    </article>
-    <article class="result-card result-scroll-card">
-      <div class="card-head"><h3>回溯时间线</h3><span class="muted">带证据引用</span></div>
-      <div class="scroll-pane timeline-list">${timelineRows || "<p>暂无可用时间线。</p>"}</div>
-    </article>
-  `;
+function getFallbackPanels(finalResult) {
+  return [
+    {
+      panel_id: "goal_response",
+      title: "目标回答",
+      panel_type: "goal",
+      summary: "点对点回应当前分析目标。",
+      body: finalResult.goal_response || finalResult.verdict_summary || finalResult.case_explanation,
+      items: [],
+      evidence_refs: [],
+    },
+    {
+      panel_id: "analysis",
+      title: "分析解释",
+      panel_type: "analysis",
+      summary: "主解释与综合判断。",
+      body: finalResult.case_explanation,
+      items: [finalResult.verdict_summary],
+      evidence_refs: [],
+    },
+    {
+      panel_id: "ranking",
+      title: "关键对象排序",
+      panel_type: "ranking",
+      summary: "关键对象及其驱动链。",
+      body: finalResult.verdict_summary,
+      items: (finalResult.suspect_rankings || []).map((item, index) => `${index + 1}. ${item.name} | ${item.role} | ${item.motive}`),
+      evidence_refs: [],
+    },
+    {
+      panel_id: "timeline",
+      title: "回溯时间线",
+      panel_type: "timeline",
+      summary: "按证据重建形成过程。",
+      body: "",
+      items: (finalResult.reenactment_timeline || []).map((item) => `${item.order}. ${item.time_hint} | ${item.event}`),
+      evidence_refs: [],
+    },
+    {
+      panel_id: "evidence",
+      title: "证据与不确定性",
+      panel_type: "evidence",
+      summary: "支持点与未决问题。",
+      body: "",
+      items: [...(finalResult.evidence_notes || []), ...(finalResult.uncertainties || [])],
+      evidence_refs: [],
+    },
+  ];
 }
 
+function renderResults(finalResult) {
+  const panels = (finalResult.output_panels && finalResult.output_panels.length ? finalResult.output_panels : getFallbackPanels(finalResult)).slice(0, 6);
+  els.resultRoot.className = "result-grid";
+  els.resultRoot.innerHTML = panels
+    .map(
+      (panel) => `
+        <article class="result-card result-scroll-card" data-panel-id="${escapeHtml(panel.panel_id)}">
+          <div class="card-head">
+            <h3>${escapeHtml(panel.title)}</h3>
+            <span class="muted">${escapeHtml(panel.summary || panel.panel_type || "")}</span>
+          </div>
+          <div class="scroll-pane">
+            ${panel.body ? `<p class="rich-text">${escapeHtmlWithBreaks(panel.body)}</p>` : ""}
+            ${(panel.items || []).length ? `<ul>${panel.items.map((item) => `<li class="rich-text">${escapeHtmlWithBreaks(item)}</li>`).join("")}</ul>` : '<p class="muted">暂无补充内容。</p>'}
+            ${
+              (panel.evidence_refs || []).length
+                ? `<div class="chips">${panel.evidence_refs.map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("")}</div>`
+                : ""
+            }
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
 async function loadConfig() {
   const config = await fetchJson("/api/model-config");
   els.providerName.value = config.provider_name || "";
@@ -730,91 +818,141 @@ async function loadSample() {
   setStatus(`样例已载入：${sample.title}`);
 }
 
+function buildInitialSnapshotResponse(snapshot) {
+  renderPipeline(snapshot.pipeline || []);
+  renderDocument(snapshot.document, snapshot.evidence_items || [], snapshot.expected_outcome, snapshot.extracted_text || "");
+  if (els.collaborationRounds && Number.isFinite(Number(snapshot.collaboration_rounds))) {
+    els.collaborationRounds.value = String(snapshot.collaboration_rounds);
+  }
+  els.modelBadge.textContent = snapshot.model_status || "preparing";
+  setStatus(snapshot.status_text || "任务已创建。");
+}
+
+function mergeSnapshot(snapshot) {
+  state.parseData = snapshot;
+  renderPipeline(snapshot.pipeline || []);
+  renderDocument(snapshot.document, snapshot.evidence_items || [], snapshot.expected_outcome, snapshot.extracted_text || "");
+  if (els.collaborationRounds && Number.isFinite(Number(snapshot.collaboration_rounds))) {
+    els.collaborationRounds.value = String(snapshot.collaboration_rounds);
+  }
+  els.modelBadge.textContent = snapshot.model_status || "running";
+  setStatus(snapshot.status_text || snapshot.status || "处理中");
+
+  if ((snapshot.graph_nodes || []).length) {
+    renderGraph(snapshot.graph_nodes, snapshot.graph_edges || []);
+  }
+  if ((snapshot.agent_profiles || []).length) {
+    renderAgentProfiles(snapshot.agent_profiles);
+  }
+
+  const newSteps = (snapshot.agents || []).slice(state.agentSteps.length);
+  for (const step of newSteps) {
+    if (!state.renderedRounds.has(step.round_index)) {
+      appendSystemDialogue(`第 ${step.round_index} 轮协作开始`, step.round_index);
+      state.renderedRounds.add(step.round_index);
+    }
+    renderAgentTurn({
+      agent_profile: (snapshot.agent_profiles || []).find((item) => item.agent_name === step.agent_name) || {},
+      agent_step: step,
+      round_index: step.round_index,
+    });
+    state.agentSteps.push(step);
+    setActiveAgent(step.agent_name);
+  }
+
+  const newDialogue = (snapshot.agent_dialogue || []).slice(state.dialogueItems.length);
+  if (newDialogue.length) {
+    state.dialogueItems.push(...newDialogue);
+    playDialogueItems(newDialogue);
+  }
+
+  if (snapshot.final_result && !state.finalRendered) {
+    renderResults(snapshot.final_result);
+    state.finalRendered = true;
+    setActiveAgent("");
+  }
+}
+
+async function pollSession(sessionId, token, consecutiveFailures = 0) {
+  if (token !== state.pollToken || sessionId !== state.sessionId) return;
+  try {
+    const snapshot = await fetchJson(`/api/case-session/${sessionId}`);
+    mergeSnapshot(snapshot);
+    if (["completed", "failed"].includes(snapshot.status)) {
+      if (snapshot.status === "failed") {
+        els.pipelineRoot.className = "pipeline";
+        els.pipelineRoot.innerHTML += `<article class="pipeline-step fallback"><strong>错误</strong><p>${escapeHtml(snapshot.error || "任务执行失败")}</p></article>`;
+      }
+      return;
+    }
+    state.pollTimer = window.setTimeout(() => pollSession(sessionId, token, 0), 1100);
+  } catch (error) {
+    const nextFailures = consecutiveFailures + 1;
+    setStatus(`正在等待服务继续返回结果（第 ${nextFailures} 次重试）`);
+    state.pollTimer = window.setTimeout(() => pollSession(sessionId, token, nextFailures), Math.min(3000, 1000 + nextFailures * 300));
+  }
+}
+
 async function runWorkflow() {
   resetWorkspace();
-  setStatus("正在解析材料");
-  els.modelBadge.textContent = "parsing";
+  setStatus("正在创建分析会话");
+  els.modelBadge.textContent = "preparing";
 
   const formData = new FormData();
   formData.append("expected_outcome", els.expectedOutcome.value.trim() || "请重建这份材料所指向的形成链条。");
+  formData.append("collaboration_rounds", String(Math.max(1, Math.min(6, Number(els.collaborationRounds?.value || 2) || 2))));
   formData.append("raw_text", els.rawText.value.trim());
   const file = els.fileInput.files[0];
   if (file) formData.append("file", file);
 
   try {
-    const parseData = await fetchJson("/api/case-parse", { method: "POST", body: formData });
-    state.parseData = parseData;
-    renderPipeline(parseData.pipeline);
-    renderDocument(parseData.document, parseData.evidence_items, parseData.expected_outcome, parseData.extracted_text);
-    renderGraph(parseData.graph_nodes, parseData.graph_edges);
-    renderAgentProfiles(parseData.agent_profiles || []);
-
-    els.modelBadge.textContent = "reasoning";
-    updatePipeline("in_progress", "pending");
-
-    for (const roundPlan of COPY.collaborationPlan) {
-      appendSystemDialogue(roundPlan.label, roundPlan.roundIndex);
-      setStatus(`${roundPlan.label} 进行中`);
-      for (const agentName of roundPlan.agents) {
-        const profile = (parseData.agent_profiles || []).find((item) => item.agent_name === agentName);
-        if (!profile) continue;
-        setActiveAgent(agentName);
-        setStatus(`Round ${roundPlan.roundIndex}: ${agentName}`);
-        const turn = await fetchJson("/api/case-agent-turn", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            structured_case: parseData.structured_case,
-            expected_outcome: parseData.expected_outcome,
-            detected_language: parseData.detected_language,
-            document: parseData.document,
-            agent_name: agentName,
-            round_index: roundPlan.roundIndex,
-            prior_steps: state.agentSteps,
-            prior_dialogue: state.dialogueItems,
-          }),
-        });
-        renderAgentTurn(turn);
-        state.agentSteps.push(turn.agent_step);
-        state.dialogueItems.push(...(turn.dialogue || []));
-        await playDialogueItems(turn.dialogue || []);
-        await sleep(150);
-      }
-    }
-
-    setActiveAgent("");
-    updatePipeline("completed", "in_progress");
-    setStatus("正在生成综合分析结果");
-
-    const synthesis = await fetchJson("/api/case-synthesis", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        structured_case: parseData.structured_case,
-        expected_outcome: parseData.expected_outcome,
-        detected_language: parseData.detected_language,
-        document: parseData.document,
-        agent_steps: state.agentSteps,
-      }),
-    });
-
-    renderPipeline(synthesis.pipeline);
-    renderResults(synthesis.final_result);
-    els.modelBadge.textContent = synthesis.model_status;
-    setStatus("分析完成");
+    const snapshot = await fetchJson("/api/case-session/start", { method: "POST", body: formData });
+    state.sessionId = snapshot.session_id;
+    buildInitialSnapshotResponse(snapshot);
+    const token = state.pollToken + 1;
+    state.pollToken = token;
+    pollSession(snapshot.session_id, token, 0);
   } catch (error) {
-    setStatus("任务失败");
+    setStatus("任务启动失败");
     els.pipelineRoot.className = "pipeline";
     els.pipelineRoot.innerHTML = `<article class="pipeline-step fallback"><strong>错误</strong><p>${escapeHtml(String(error.message).slice(0, 500))}</p></article>`;
   }
 }
-
 async function bootstrap() {
+  mountThemeToggle();
   const design = await fetchJson("/api/design");
   els.designNotes.innerHTML = [...design.borrowed_from_mirofish, ...design.rewritten_for_backtrace]
     .map((item) => `<li>${escapeHtml(item)}</li>`)
     .join("");
   await loadConfig();
+}
+
+function applyTheme(theme, persist = true) {
+  state.theme = THEME_ORDER.includes(theme) ? theme : "sky";
+  document.documentElement.dataset.theme = state.theme;
+  const button = document.getElementById("themeToggle");
+  if (button) {
+    const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(state.theme) + 1) % THEME_ORDER.length];
+    button.textContent = `主题：${THEME_LABELS[state.theme]} / 切换到${THEME_LABELS[nextTheme]}`;
+  }
+  if (persist) {
+    window.localStorage.setItem("salmon-theme", state.theme);
+  }
+}
+
+function mountThemeToggle() {
+  const host = document.querySelector(".brand-line");
+  if (!host || document.getElementById("themeToggle")) return;
+  const button = document.createElement("button");
+  button.id = "themeToggle";
+  button.className = "ghost small theme-toggle";
+  button.type = "button";
+  button.addEventListener("click", () => {
+    const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(state.theme) + 1) % THEME_ORDER.length];
+    applyTheme(nextTheme);
+  });
+  host.appendChild(button);
+  applyTheme(window.localStorage.getItem("salmon-theme") || "sky", false);
 }
 
 function handleRefClick(event) {

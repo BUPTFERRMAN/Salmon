@@ -7,6 +7,7 @@ from app.analysis.case_workflow import parse_case_material, reason_case_material
 from app.analysis.conversation import analyze_conversation
 from app.analysis.llm import load_model_config, model_config_view, save_model_config
 from app.analysis.sample_data import CASE_SAMPLE, CONVERSATION_SAMPLE, DEMO_LIBRARY
+from app.analysis.session_manager import session_manager
 from app.core.document_parser import DocumentParser
 from app.schemas import AnalysisRequest, AgentTurnRequest, CaseReasonRequest, CaseSynthesisRequest, ModelConfig
 
@@ -73,6 +74,7 @@ def analyze_case_route(payload: AnalysisRequest) -> dict:
 @router.post("/case-parse")
 async def case_parse_route(
     expected_outcome: str = Form("请重建这份材料所指向的形成链条。"),
+    collaboration_rounds: int = Form(2),
     raw_text: str = Form(""),
     file: Optional[UploadFile] = File(default=None),
 ) -> dict:
@@ -90,7 +92,12 @@ async def case_parse_route(
     if not text.strip():
         raise HTTPException(status_code=400, detail="文档解析后没有拿到有效文本。")
 
-    return parse_case_material(text=text, document=document, expected_outcome=expected_outcome).model_dump()
+    return parse_case_material(
+        text=text,
+        document=document,
+        expected_outcome=expected_outcome,
+        collaboration_rounds=collaboration_rounds,
+    ).model_dump()
 
 
 @router.post("/case-reason")
@@ -133,6 +140,7 @@ def case_synthesis_route(payload: CaseSynthesisRequest) -> dict:
 @router.post("/case-workflow")
 async def case_workflow_route(
     expected_outcome: str = Form("请重建这份材料所指向的形成链条。"),
+    collaboration_rounds: int = Form(2),
     raw_text: str = Form(""),
     file: Optional[UploadFile] = File(default=None),
 ) -> dict:
@@ -150,4 +158,47 @@ async def case_workflow_route(
     if not text.strip():
         raise HTTPException(status_code=400, detail="文档解析后没有拿到有效文本。")
 
-    return run_case_workflow(text=text, document=document, expected_outcome=expected_outcome).model_dump()
+    return run_case_workflow(
+        text=text,
+        document=document,
+        expected_outcome=expected_outcome,
+        collaboration_rounds=collaboration_rounds,
+    ).model_dump()
+
+
+@router.post("/case-session/start")
+async def case_session_start_route(
+    expected_outcome: str = Form("请重建这份材料所指向的形成链条。"),
+    collaboration_rounds: int = Form(2),
+    raw_text: str = Form(""),
+    file: Optional[UploadFile] = File(default=None),
+) -> dict:
+    if file is None and not raw_text.strip():
+        raise HTTPException(status_code=400, detail="请上传 PDF/TXT/MD 文件，或直接输入分析材料。")
+
+    try:
+        if file is not None and file.filename:
+            document, text = await DocumentParser.parse_upload(file)
+        else:
+            document, text = DocumentParser.parse_text(raw_text, source_name="direct-input.txt")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="文档解析后没有拿到有效文本。")
+
+    session = session_manager.create_session(
+        text=text,
+        document=document,
+        expected_outcome=expected_outcome.strip() or "请重建这份材料所指向的形成链条。",
+        collaboration_rounds=collaboration_rounds,
+    )
+    return session.model_dump()
+
+
+@router.get("/case-session/{session_id}")
+def case_session_status_route(session_id: str) -> dict:
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在或已过期。")
+    return session.model_dump()
