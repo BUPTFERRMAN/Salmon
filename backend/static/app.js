@@ -19,6 +19,8 @@
   agentRoot: document.getElementById("agentRoot"),
   agentDialogue: document.getElementById("agentDialogue"),
   resultRoot: document.getElementById("resultRoot"),
+  apiHealthBadge: document.getElementById("apiHealthBadge"),
+  errorConsole: document.getElementById("errorConsole"),
 };
 
 const COPY = {
@@ -62,6 +64,9 @@ const state = {
   selectedLinkKey: null,
   selectedEvidenceRef: null,
   theme: "sky",
+  apiHealth: "unknown",
+  lastHealthCheckAt: 0,
+  runtimeMessages: [],
 };
 
 const THEME_ORDER = ["sky", "warm", "dark"];
@@ -89,9 +94,26 @@ function escapeHtmlWithBreaks(value) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const { meta = {}, ...fetchOptions } = options;
+  if (!meta.skipHealthCheck && url !== "/api/health") {
+    const reachable = await checkApiHealth({ force: meta.forceHealthCheck, silent: true });
+    if (!reachable) {
+      const message = "API 服务不可达，请检查后端是否启动或网络是否连通。";
+      appendRuntimeMessage("error", "API 连通性检查失败", message);
+      throw new Error(message);
+    }
+  }
+  let response;
+  try {
+    response = await fetch(url, fetchOptions);
+  } catch (error) {
+    const message = `请求 ${url} 失败：${String(error.message || error)}`;
+    appendRuntimeMessage("error", "请求失败", message);
+    throw error;
+  }
   if (!response.ok) {
     const message = await response.text();
+    appendRuntimeMessage("error", "接口返回错误", `${url} -> ${String(message || response.statusText).slice(0, 500)}`);
     throw new Error(message || "请求失败");
   }
   return response.json();
@@ -99,6 +121,77 @@ async function fetchJson(url, options = {}) {
 
 function setStatus(text) {
   els.statusText.textContent = text;
+}
+
+function appendRuntimeMessage(level, title, detail = "") {
+  const entry = {
+    level: level || "info",
+    title: title || "运行提示",
+    detail: String(detail || ""),
+    timestamp: new Date(),
+  };
+  state.runtimeMessages = [entry, ...state.runtimeMessages].slice(0, 24);
+  renderRuntimeConsole();
+}
+
+function renderRuntimeConsole() {
+  if (!els.errorConsole) return;
+  if (!state.runtimeMessages.length) {
+    els.errorConsole.className = "error-console empty";
+    els.errorConsole.textContent = "尚无运行反馈。页面加载后会先检查一次服务连通性。";
+    return;
+  }
+  els.errorConsole.className = "error-console";
+  els.errorConsole.innerHTML = state.runtimeMessages
+    .map((item) => {
+      const stamp = item.timestamp instanceof Date ? item.timestamp.toLocaleTimeString("zh-CN", { hour12: false }) : "";
+      return `
+        <article class="error-item ${escapeHtml(item.level)}">
+          <div class="error-head">
+            <strong>${escapeHtml(item.title)}</strong>
+            <span class="muted">${escapeHtml(stamp)}</span>
+          </div>
+          ${item.detail ? `<p class="rich-text">${escapeHtmlWithBreaks(item.detail)}</p>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function setApiHealthBadge(status, label) {
+  if (!els.apiHealthBadge) return;
+  els.apiHealthBadge.dataset.health = status;
+  els.apiHealthBadge.textContent = label;
+}
+
+async function checkApiHealth({ force = false, silent = false } = {}) {
+  const now = Date.now();
+  if (!force && now - state.lastHealthCheckAt < 15000 && state.apiHealth === "online") {
+    return true;
+  }
+  state.lastHealthCheckAt = now;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetch("/api/health", { signal: controller.signal });
+    if (!response.ok) throw new Error(response.statusText || "health check failed");
+    const payload = await response.json();
+    state.apiHealth = "online";
+    setApiHealthBadge("online", payload.status === "ok" ? "API 正常" : "API 已响应");
+    if (!silent) {
+      appendRuntimeMessage("info", "API 连通性", "后端服务已连接，可继续运行分析。");
+    }
+    return true;
+  } catch (error) {
+    state.apiHealth = "offline";
+    setApiHealthBadge("offline", "API 不可达");
+    if (!silent) {
+      appendRuntimeMessage("error", "API 连通性", `无法访问 /api/health：${String(error.message || error)}`);
+    }
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 function clearPolling() {
@@ -274,9 +367,47 @@ function renderDocument(document, evidenceItems = [], expectedOutcome = "", full
 }
 
 function nodeColor(node) {
-  if (node.node_type === "actor") return "#b44d28";
-  if (node.node_type === "event") return "#254d59";
-  return "#c59c3d";
+  const palette = graphPalette();
+  if (node.node_type === "actor") return palette.actor;
+  if (node.node_type === "event") return palette.event;
+  return palette.clue;
+}
+
+function graphPalette() {
+  if (state.theme === "dark") {
+    return {
+      actor: "#ffb792",
+      event: "#79d7ff",
+      clue: "#ffe18c",
+      defaultLink: "rgba(143, 211, 255, 0.52)",
+      mutedLink: "rgba(143, 191, 235, 0.14)",
+      mutedNode: "rgba(120, 149, 180, 0.22)",
+      activeLink: "rgba(255, 232, 169, 0.96)",
+      focusNode: "#f4fbff",
+    };
+  }
+  if (state.theme === "warm") {
+    return {
+      actor: "#b44d28",
+      event: "#254d59",
+      clue: "#c59c3d",
+      defaultLink: "rgba(29,26,24,0.2)",
+      mutedLink: "rgba(160,160,160,0.16)",
+      mutedNode: "rgba(160,160,160,0.22)",
+      activeLink: "rgba(37,77,89,0.82)",
+      focusNode: "#111111",
+    };
+  }
+  return {
+    actor: "#367fbe",
+    event: "#205d92",
+    clue: "#88bfe8",
+    defaultLink: "rgba(54,127,190,0.24)",
+    mutedLink: "rgba(160,160,160,0.16)",
+    mutedNode: "rgba(160,160,160,0.22)",
+    activeLink: "rgba(36,104,166,0.9)",
+    focusNode: "#102b47",
+  };
 }
 
 function linkKey(link) {
@@ -334,6 +465,7 @@ function neighborMap() {
 
 function applyGraphHighlight() {
   if (!state.graphInstance) return;
+  const palette = graphPalette();
   const neighbors = neighborMap();
   const { selectedNodeId, selectedLinkKey, selectedEvidenceRef } = state;
   const evidenceContext = selectedEvidenceRef ? collectEvidenceContext(selectedEvidenceRef) : { nodes: [], links: [] };
@@ -349,33 +481,33 @@ function applyGraphHighlight() {
   state.graphInstance
     .nodeColor((node) => {
       if (selectedEvidenceRef) {
-        return evidenceNodeIds.has(node.id) ? node.color : "rgba(160,160,160,0.18)";
+        return evidenceNodeIds.has(node.id) ? node.color : palette.mutedNode;
       }
       if (selectedNodeId) {
-        if (node.id === selectedNodeId) return "#111111";
-        return neighbors.get(selectedNodeId)?.has(node.id) ? node.color : "rgba(160,160,160,0.22)";
+        if (node.id === selectedNodeId) return palette.focusNode;
+        return neighbors.get(selectedNodeId)?.has(node.id) ? node.color : palette.mutedNode;
       }
       if (selectedLinkKey) {
         const activeLink = state.graphData.links.find((item) => item.key === selectedLinkKey);
         const source = typeof activeLink?.source === "object" ? activeLink.source.id : activeLink?.source;
         const target = typeof activeLink?.target === "object" ? activeLink.target.id : activeLink?.target;
-        return node.id === source || node.id === target ? node.color : "rgba(160,160,160,0.22)";
+        return node.id === source || node.id === target ? node.color : palette.mutedNode;
       }
       return node.color;
     })
     .linkColor((link) => {
       if (selectedEvidenceRef) {
-        return linkMatchesEvidence(link, selectedEvidenceRef) ? "rgba(17,17,17,0.92)" : "rgba(160,160,160,0.12)";
+        return linkMatchesEvidence(link, selectedEvidenceRef) ? palette.activeLink : palette.mutedLink;
       }
       if (selectedNodeId) {
         const source = typeof link.source === "object" ? link.source.id : link.source;
         const target = typeof link.target === "object" ? link.target.id : link.target;
-        return source === selectedNodeId || target === selectedNodeId ? "rgba(37,77,89,0.82)" : "rgba(160,160,160,0.16)";
+        return source === selectedNodeId || target === selectedNodeId ? palette.activeLink : palette.mutedLink;
       }
       if (selectedLinkKey) {
-        return link.key === selectedLinkKey ? "rgba(17,17,17,0.92)" : "rgba(160,160,160,0.16)";
+        return link.key === selectedLinkKey ? palette.activeLink : palette.mutedLink;
       }
-      return "rgba(29,26,24,0.2)";
+      return palette.defaultLink;
     })
     .linkWidth((link) => {
       if (selectedEvidenceRef) {
@@ -580,6 +712,7 @@ function renderGraph(nodes = [], edges = []) {
 
   const width = Math.max(480, els.graphCanvas.clientWidth - 24);
   const height = Math.max(560, els.graphCanvas.clientHeight - 24);
+  const palette = graphPalette();
   state.graphInstance = ForceGraph3D()(els.graphCanvas)
     .width(width)
     .height(height)
@@ -591,7 +724,7 @@ function renderGraph(nodes = [], edges = []) {
     .nodeColor((node) => node.color)
     .nodeVal((node) => node.val)
     .nodeLabel((node) => `${escapeHtml(node.label)}<br />${escapeHtml(node.node_type)}`)
-    .linkColor(() => "rgba(29,26,24,0.2)")
+    .linkColor(() => palette.defaultLink)
     .linkWidth((link) => 2.2 + Number(link.strength || 0.5) * 1.1)
     .linkOpacity(0.72)
     .linkDirectionalParticles(1)
@@ -770,11 +903,6 @@ function renderResults(finalResult) {
           <div class="scroll-pane">
             ${panel.body ? `<p class="rich-text">${escapeHtmlWithBreaks(panel.body)}</p>` : ""}
             ${(panel.items || []).length ? `<ul>${panel.items.map((item) => `<li class="rich-text">${escapeHtmlWithBreaks(item)}</li>`).join("")}</ul>` : '<p class="muted">暂无补充内容。</p>'}
-            ${
-              (panel.evidence_refs || []).length
-                ? `<div class="chips">${panel.evidence_refs.map((ref) => `<button class="pill link-pill" data-ref-id="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("")}</div>`
-                : ""
-            }
           </div>
         </article>
       `,
@@ -809,6 +937,7 @@ async function saveConfig() {
   els.configState.textContent = payload.enabled
     ? "模型配置已保存，后续任务会优先调用外部模型。"
     : "模型配置已保存，当前处于关闭状态。";
+  appendRuntimeMessage("info", "模型配置", payload.enabled ? "模型配置已保存并启用。" : "模型配置已保存，当前使用规则链路。");
 }
 
 async function loadSample() {
@@ -816,6 +945,7 @@ async function loadSample() {
   els.rawText.value = sample.seed_text;
   els.expectedOutcome.value = sample.expected_outcome;
   setStatus(`样例已载入：${sample.title}`);
+  appendRuntimeMessage("info", "样例加载", `已加载样例：${sample.title}`);
 }
 
 function buildInitialSnapshotResponse(snapshot) {
@@ -876,12 +1006,15 @@ function mergeSnapshot(snapshot) {
 async function pollSession(sessionId, token, consecutiveFailures = 0) {
   if (token !== state.pollToken || sessionId !== state.sessionId) return;
   try {
-    const snapshot = await fetchJson(`/api/case-session/${sessionId}`);
+    const snapshot = await fetchJson(`/api/case-session/${sessionId}`, { meta: { skipHealthCheck: true } });
     mergeSnapshot(snapshot);
     if (["completed", "failed"].includes(snapshot.status)) {
       if (snapshot.status === "failed") {
         els.pipelineRoot.className = "pipeline";
         els.pipelineRoot.innerHTML += `<article class="pipeline-step fallback"><strong>错误</strong><p>${escapeHtml(snapshot.error || "任务执行失败")}</p></article>`;
+        appendRuntimeMessage("error", "会话执行失败", snapshot.error || "任务执行失败");
+      } else {
+        appendRuntimeMessage("info", "分析完成", snapshot.status_text || "分析流程已结束。");
       }
       return;
     }
@@ -889,6 +1022,9 @@ async function pollSession(sessionId, token, consecutiveFailures = 0) {
   } catch (error) {
     const nextFailures = consecutiveFailures + 1;
     setStatus(`正在等待服务继续返回结果（第 ${nextFailures} 次重试）`);
+    if (nextFailures === 1 || nextFailures % 4 === 0) {
+      appendRuntimeMessage("warn", "轮询重试", `会话 ${sessionId} 第 ${nextFailures} 次轮询失败：${String(error.message || error)}`);
+    }
     state.pollTimer = window.setTimeout(() => pollSession(sessionId, token, nextFailures), Math.min(3000, 1000 + nextFailures * 300));
   }
 }
@@ -897,6 +1033,7 @@ async function runWorkflow() {
   resetWorkspace();
   setStatus("正在创建分析会话");
   els.modelBadge.textContent = "preparing";
+  appendRuntimeMessage("info", "任务启动", "正在提交分析材料并创建会话。");
 
   const formData = new FormData();
   formData.append("expected_outcome", els.expectedOutcome.value.trim() || "请重建这份材料所指向的形成链条。");
@@ -909,6 +1046,7 @@ async function runWorkflow() {
     const snapshot = await fetchJson("/api/case-session/start", { method: "POST", body: formData });
     state.sessionId = snapshot.session_id;
     buildInitialSnapshotResponse(snapshot);
+    appendRuntimeMessage("info", "会话创建成功", `session_id=${snapshot.session_id}，协作轮数=${snapshot.collaboration_rounds ?? els.collaborationRounds?.value ?? 2}`);
     const token = state.pollToken + 1;
     state.pollToken = token;
     pollSession(snapshot.session_id, token, 0);
@@ -916,24 +1054,40 @@ async function runWorkflow() {
     setStatus("任务启动失败");
     els.pipelineRoot.className = "pipeline";
     els.pipelineRoot.innerHTML = `<article class="pipeline-step fallback"><strong>错误</strong><p>${escapeHtml(String(error.message).slice(0, 500))}</p></article>`;
+    appendRuntimeMessage("error", "任务启动失败", String(error.message || error).slice(0, 1000));
   }
 }
 async function bootstrap() {
   mountThemeToggle();
-  const design = await fetchJson("/api/design");
-  els.designNotes.innerHTML = [...design.borrowed_from_mirofish, ...design.rewritten_for_backtrace]
-    .map((item) => `<li>${escapeHtml(item)}</li>`)
-    .join("");
-  await loadConfig();
+  renderRuntimeConsole();
+  await checkApiHealth({ force: true });
+  try {
+    const design = await fetchJson("/api/design");
+    els.designNotes.innerHTML = [...design.borrowed_from_mirofish, ...design.rewritten_for_backtrace]
+      .map((item) => `<li>${escapeHtml(item)}</li>`)
+      .join("");
+    await loadConfig();
+  } catch (error) {
+    appendRuntimeMessage("error", "页面初始化失败", String(error.message || error).slice(0, 1000));
+  }
 }
 
 function applyTheme(theme, persist = true) {
   state.theme = THEME_ORDER.includes(theme) ? theme : "sky";
   document.documentElement.dataset.theme = state.theme;
-  const button = document.getElementById("themeToggle");
-  if (button) {
-    const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(state.theme) + 1) % THEME_ORDER.length];
-    button.textContent = `主题：${THEME_LABELS[state.theme]} / 切换到${THEME_LABELS[nextTheme]}`;
+  document.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.themeOption === state.theme);
+  });
+  if (state.graphData.nodes.length) {
+    state.graphData.nodes.forEach((node) => {
+      node.color = nodeColor(node);
+    });
+    if (state.graphInstance) {
+      state.graphInstance.graphData(state.graphData);
+      if (!restoreGraphSelection()) {
+        applyGraphHighlight();
+      }
+    }
   }
   if (persist) {
     window.localStorage.setItem("salmon-theme", state.theme);
@@ -942,16 +1096,15 @@ function applyTheme(theme, persist = true) {
 
 function mountThemeToggle() {
   const host = document.querySelector(".brand-line");
-  if (!host || document.getElementById("themeToggle")) return;
-  const button = document.createElement("button");
-  button.id = "themeToggle";
-  button.className = "ghost small theme-toggle";
-  button.type = "button";
-  button.addEventListener("click", () => {
-    const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(state.theme) + 1) % THEME_ORDER.length];
-    applyTheme(nextTheme);
+  if (!host || document.getElementById("themeSwitch")) return;
+  const wrap = document.createElement("div");
+  wrap.id = "themeSwitch";
+  wrap.className = "theme-switch";
+  wrap.innerHTML = THEME_ORDER.map((theme) => `<button type="button" class="ghost small theme-option" data-theme-option="${escapeHtml(theme)}">${escapeHtml(THEME_LABELS[theme])}</button>`).join("");
+  wrap.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.addEventListener("click", () => applyTheme(button.dataset.themeOption || "sky"));
   });
-  host.appendChild(button);
+  host.appendChild(wrap);
   applyTheme(window.localStorage.getItem("salmon-theme") || "sky", false);
 }
 

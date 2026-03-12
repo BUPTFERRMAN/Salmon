@@ -1526,12 +1526,17 @@ def _build_graph(structured: Dict, source_name: str, language: str) -> Tuple[Lis
     required_event_ids = set()
     related_nodes: Dict[str, set] = defaultdict(set)
     edge_keys = set()
+    clue_to_events: Dict[str, List[str]] = {}
+    clue_to_actors: Dict[str, List[str]] = {}
+    event_to_actors: Dict[str, List[str]] = {}
 
     def add_edge(edge: GraphEdge) -> None:
         key = (edge.source, edge.target, edge.relation, tuple(edge.evidence_refs))
         if key in edge_keys:
             return
         edge_keys.add(key)
+        related_nodes[edge.source].add(edge.target)
+        related_nodes[edge.target].add(edge.source)
         edges.append(edge)
 
     for clue in structured.get("clues", [])[:10]:
@@ -1571,6 +1576,7 @@ def _build_graph(structured: Dict, source_name: str, language: str) -> Tuple[Lis
         if not _segment_has_material_value(event["description"]):
             continue
         event_ids.add(event["id"])
+        event_to_actors[event["id"]] = [actor_name for actor_name in event.get("actors", []) if actor_name in actor_ids]
         nodes.append(
             GraphNode(
                 node_id=event["id"],
@@ -1610,6 +1616,8 @@ def _build_graph(structured: Dict, source_name: str, language: str) -> Tuple[Lis
     for clue in structured.get("clues", [])[:10]:
         if not _segment_has_material_value(clue["detail"]):
             continue
+        clue_to_events[clue["id"]] = [event_id for event_id in clue.get("event_ids", []) if event_id in event_ids]
+        clue_to_actors[clue["id"]] = [actor_name for actor_name in clue.get("actors", []) if actor_name in actor_ids]
         nodes.append(
             GraphNode(
                 node_id=clue["id"],
@@ -1624,8 +1632,6 @@ def _build_graph(structured: Dict, source_name: str, language: str) -> Tuple[Lis
         )
         for event_id in clue.get("event_ids", []):
             if event_id in event_ids:
-                related_nodes[event_id].add(clue["id"])
-                related_nodes[clue["id"]].add(event_id)
                 add_edge(
                     GraphEdge(
                         source=event_id,
@@ -1639,8 +1645,6 @@ def _build_graph(structured: Dict, source_name: str, language: str) -> Tuple[Lis
                 )
         for actor_name in clue.get("actors", []):
             if actor_name in actor_ids:
-                related_nodes[actor_ids[actor_name]].add(clue["id"])
-                related_nodes[clue["id"]].add(actor_ids[actor_name])
                 add_edge(
                     GraphEdge(
                         source=actor_ids[actor_name],
@@ -1652,6 +1656,104 @@ def _build_graph(structured: Dict, source_name: str, language: str) -> Tuple[Lis
                         strength=0.74,
                     )
                 )
+
+    selected_event_ids = [event["id"] for event in selected_events if event.get("id") in event_ids]
+    for index in range(len(selected_event_ids) - 1):
+        source_id = selected_event_ids[index]
+        target_id = selected_event_ids[index + 1]
+        source_event = next((item for item in selected_events if item.get("id") == source_id), None)
+        target_event = next((item for item in selected_events if item.get("id") == target_id), None)
+        if not source_event or not target_event:
+            continue
+        bridge_refs = [
+            *[str(value) for value in _ensure_list(source_event.get("evidence_refs")) if str(value).strip()][:1],
+            *[str(value) for value in _ensure_list(target_event.get("evidence_refs")) if str(value).strip()][:1],
+        ]
+        add_edge(
+            GraphEdge(
+                source=source_id,
+                target=target_id,
+                relation="precedes",
+                evidence=f"{source_event.get('time_hint', '')} -> {target_event.get('time_hint', '')}",
+                evidence_refs=bridge_refs[:2],
+                evidence_details=[
+                    EvidenceDetail(
+                        ref_id=ref_id,
+                        excerpt=f"{source_event.get('description', '')[:100]} -> {target_event.get('description', '')[:100]}",
+                        source=source_name,
+                        note="相邻事件按时间顺序连接。",
+                    )
+                    for ref_id in bridge_refs[:2]
+                ],
+                strength=0.56,
+            )
+        )
+
+    actor_pair_map: Dict[Tuple[str, str], Dict[str, List[str]]] = {}
+    for event_id, actors in event_to_actors.items():
+        refs = [event_id]
+        for left_index in range(len(actors)):
+            for right_index in range(left_index + 1, len(actors)):
+                pair = tuple(sorted((actors[left_index], actors[right_index])))
+                bucket = actor_pair_map.setdefault(pair, {"refs": [], "events": []})
+                bucket["refs"].extend(refs)
+                bucket["events"].append(event_id)
+
+    for (left_actor, right_actor), payload in actor_pair_map.items():
+        left_id = actor_ids.get(left_actor)
+        right_id = actor_ids.get(right_actor)
+        if not left_id or not right_id:
+            continue
+        refs = list(dict.fromkeys(payload["refs"]))[:3]
+        add_edge(
+            GraphEdge(
+                source=left_id,
+                target=right_id,
+                relation="co_occurs_with",
+                evidence=f"{left_actor} 与 {right_actor} 在多个事件中共同出现。",
+                evidence_refs=refs,
+                evidence_details=[
+                    EvidenceDetail(
+                        ref_id=ref_id,
+                        excerpt=f"{left_actor} / {right_actor} 共同关联到事件 {ref_id}",
+                        source=source_name,
+                        note="由共享事件生成的人物关系边。",
+                    )
+                    for ref_id in refs
+                ],
+                strength=0.64,
+            )
+        )
+
+    clue_ids = [clue["id"] for clue in structured.get("clues", [])[:10] if clue.get("id") in clue_to_events]
+    for left_index in range(len(clue_ids)):
+        for right_index in range(left_index + 1, len(clue_ids)):
+            left_id = clue_ids[left_index]
+            right_id = clue_ids[right_index]
+            shared_events = sorted(set(clue_to_events.get(left_id, [])) & set(clue_to_events.get(right_id, [])))
+            shared_actors = sorted(set(clue_to_actors.get(left_id, [])) & set(clue_to_actors.get(right_id, [])))
+            if not shared_events and not shared_actors:
+                continue
+            refs = [*shared_events[:2], *[actor_ids[name] for name in shared_actors[:1] if name in actor_ids]]
+            add_edge(
+                GraphEdge(
+                    source=left_id,
+                    target=right_id,
+                    relation="corroborates",
+                    evidence=" / ".join([*(shared_events[:2]), *shared_actors[:2]]) or "线索之间存在共享上下文。",
+                    evidence_refs=refs[:3],
+                    evidence_details=[
+                        EvidenceDetail(
+                            ref_id=ref_id,
+                            excerpt=f"{left_id} 与 {right_id} 共享事件或人物上下文。",
+                            source=source_name,
+                            note="由共享人物或事件生成的线索关联边。",
+                        )
+                        for ref_id in refs[:3]
+                    ],
+                    strength=0.6,
+                )
+            )
 
     for node in nodes:
         node.related_node_ids = sorted(related_nodes.get(node.node_id, set()))
