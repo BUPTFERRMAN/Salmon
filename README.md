@@ -73,6 +73,7 @@ Salmon 是一个面向案件回放、历史回溯与因果链分析的多智能�
 
 ### 示例 2：聊天助手 - 恋爱分析
 
+- [视频演示：点击跳转到 Bilibili](https://www.bilibili.com/video/BV1wxcrz6Eg1/)
 - [情侣聊天.txt](examples/example-2-love-chat/情侣聊天.txt)
 - [情侣聊天问题.txt](examples/example-2-love-chat/情侣聊天问题.txt)
 
