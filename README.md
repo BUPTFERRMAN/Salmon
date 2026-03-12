@@ -64,6 +64,7 @@ Salmon 是一个面向案件回放、历史回溯与因果链分析的多智能�
 
 ### 示例 1：智能侦探 - 案情回溯
 
+- [视频演示：点击跳转到 Bilibili](https://www.bilibili.com/video/BV1iJckzYEnF/?spm_id_from=333.1387.homepage.video_card.click&vd_source=089e5b874bf4827db5f814a7206ee42e)
 - [案情结果：《巴斯克维尔的猎犬》.txt](examples/example-1-case-backtrace/案情结果：《巴斯克维尔的猎犬》.txt)
 - [案情结果：《斑点带子案》.txt](examples/example-1-case-backtrace/案情结果：《斑点带子案》.txt)
 - [案情问题.txt](examples/example-1-case-backtrace/案情问题.txt)
